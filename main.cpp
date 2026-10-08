@@ -1,10 +1,12 @@
 #include <iostream>
 #include <format>
 #include <SDL3/SDL.h>
+#include <vulkan/vulkan.h>
 #include <imgui.h>
 #include <backends/imgui_impl_sdl3.h>
 #include <backends/imgui_impl_vulkan.h>
 #include <glm/glm.hpp>
+#define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtx/string_cast.hpp>
 #include "stb_perlin.h"
 

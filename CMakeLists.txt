@@ -2,8 +2,6 @@ cmake_minimum_required(VERSION 3.28)
 set(CMAKE_CXX_STANDARD 23)
 project(CityExplorer)
 
-set(VS_STARTUP_PROJECT ${PROJECT_NAME})
-
 include(FetchContent)
 
 set(fetchTargets)
@@ -54,7 +52,7 @@ add_library(DearImGui STATIC
 	vendor/DearImGui/backends/imgui_impl_sdl3.cpp
 
 	vendor/DearImGui/misc/cpp/imgui_stdlib.cpp)
-target_link_libraries(DearImGui PRIVATE SDL3::SDL3)
+target_link_libraries(DearImGui PRIVATE SDL3::SDL3 Vulkan::Vulkan)
 target_include_directories(DearImGui PUBLIC vendor/DearImGui vendor/DearImGui/misc/cpp)
 
 add_executable(${PROJECT_NAME} main.cpp)
@@ -79,3 +77,5 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE
 	$<$<NOT:$<CONFIG:Release>>:BUILD_NRELEASE>
 	$<$<NOT:$<CONFIG:RelWithDebInfo>>:BUILD_NDEBINFO>
 )
+
+set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT ${PROJECT_NAME})

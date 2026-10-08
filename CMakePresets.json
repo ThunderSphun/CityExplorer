@@ -1,0 +1,285 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 28,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "make-debug",
+      "displayName": "GNU Makefiles - Debug",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build/make-Debug",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      },
+      "condition": {
+        "type": "notEquals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      }
+    },
+    {
+      "name": "make-release",
+      "displayName": "GNU Makefiles - Release",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build/make-Release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      },
+      "condition": {
+        "type": "notEquals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      }
+    },
+    {
+      "name": "make-debinfo",
+      "displayName": "GNU Makefiles - DebInfo",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build/make-DebInfo",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo"
+      },
+      "condition": {
+        "type": "notEquals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      }
+    },
+    {
+      "name": "vs2026",
+      "displayName": "Visual Studio 18",
+      "generator": "Visual Studio 18 2026",
+      "architecture": "x64",
+      "binaryDir": "${sourceDir}/build/vs2026",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      }
+    },
+    {
+      "name": "vs2022",
+      "displayName": "Visual Studio 17",
+      "generator": "Visual Studio 17 2022",
+      "architecture": "x64",
+      "binaryDir": "${sourceDir}/build/vs2022",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      }
+    },
+    {
+      "name": "vs2019",
+      "displayName": "Visual Studio 16",
+      "generator": "Visual Studio 16 2019",
+      "architecture": "x64",
+      "binaryDir": "${sourceDir}/build/vs2019",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      }
+    },
+    {
+      "name": "vs2017",
+      "displayName": "Visual Studio 15",
+      "generator": "Visual Studio 15 2017",
+      "architecture": "x64",
+      "binaryDir": "${sourceDir}/build/vs2017",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      }
+    },
+    {
+      "name": "vs2015",
+      "displayName": "Visual Studio 14",
+      "generator": "Visual Studio 14 2015",
+      "architecture": "x64",
+      "binaryDir": "${sourceDir}/build/vs2015",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      }
+    },
+    {
+      "name": "ninja-debug",
+      "displayName": "Ninja - Debug",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/ninja-debug",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "ninja-release",
+      "displayName": "Ninja - Release",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/ninja-release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "ninja-deb-info",
+      "displayName": "Ninja - DebInfo",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/ninja-debinfo",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo"
+      }
+    },
+    {
+      "name": "ninja-multi",
+      "displayName": "Ninja Multi",
+      "generator": "Ninja Multi-Config",
+      "binaryDir": "${sourceDir}/build/ninja-multi"
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "ninja-debug",
+      "displayName": "Ninja - Debug",
+      "configurePreset": "ninja-debug"
+    },
+    {
+      "name": "ninja-release",
+      "displayName": "Ninja - Release",
+      "configurePreset": "ninja-release"
+    },
+    {
+      "name": "ninja-debinfo",
+      "displayName": "Ninja - DebInfo",
+      "configurePreset": "ninja-deb-info"
+    },
+    {
+      "name": "ninja-multi-debug",
+      "displayName": "Ninja Multi - Debug",
+      "configurePreset": "ninja-multi",
+      "configuration": "Debug"
+    },
+    {
+      "name": "ninja-multi-release",
+      "displayName": "Ninja Multi - Release",
+      "configurePreset": "ninja-multi",
+      "configuration": "Release"
+    },
+    {
+      "name": "ninja-multi-debinfo",
+      "displayName": "Ninja Multi - DebInfo",
+      "configurePreset": "ninja-multi",
+      "configuration": "RelWithDebInfo"
+    },
+    {
+      "name": "make-debug",
+      "displayName": "Make - Debug",
+      "configurePreset": "make-debug"
+    },
+    {
+      "name": "make-release",
+      "displayName": "Make - Release",
+      "configurePreset": "make-release"
+    },
+    {
+      "name": "make-debinfo",
+      "displayName": "Make - DebInfo",
+      "configurePreset": "make-debinfo"
+    },
+    {
+      "name": "vs2026-debug",
+      "displayName": "Visual Studio 18 - Debug",
+      "configurePreset": "vs2026",
+      "configuration": "Debug"
+    },
+    {
+      "name": "vs2026-release",
+      "displayName": "Visual Studio 18 - Release",
+      "configurePreset": "vs2026",
+      "configuration": "Release"
+    },
+    {
+      "name": "vs2026-debinfo",
+      "displayName": "Visual Studio 18 - DebInfo",
+      "configurePreset": "vs2026",
+      "configuration": "RelWithDebInfo"
+    },
+    {
+      "name": "vs2022-debug",
+      "displayName": "Visual Studio 17 - Debug",
+      "configurePreset": "vs2022",
+      "configuration": "Debug"
+    },
+    {
+      "name": "vs2022-release",
+      "displayName": "Visual Studio 17 - Release",
+      "configurePreset": "vs2022",
+      "configuration": "Release"
+    },
+    {
+      "name": "vs2022-debinfo",
+      "displayName": "Visual Studio 17 - DebInfo",
+      "configurePreset": "vs2022",
+      "configuration": "RelWithDebInfo"
+    },
+    {
+      "name": "vs2019-debug",
+      "displayName": "Visual Studio 16 - Debug",
+      "configurePreset": "vs2019",
+      "configuration": "Debug"
+    },
+    {
+      "name": "vs2019-release",
+      "displayName": "Visual Studio 16 - Release",
+      "configurePreset": "vs2019",
+      "configuration": "Release"
+    },
+    {
+      "name": "vs2019-debinfo",
+      "displayName": "Visual Studio 16 - DebInfo",
+      "configurePreset": "vs2019",
+      "configuration": "RelWithDebInfo"
+    },
+    {
+      "name": "vs2017-debug",
+      "displayName": "Visual Studio 15 - Debug",
+      "configurePreset": "vs2017",
+      "configuration": "Debug"
+    },
+    {
+      "name": "vs2017-release",
+      "displayName": "Visual Studio 15 - Release",
+      "configurePreset": "vs2017",
+      "configuration": "Release"
+    },
+    {
+      "name": "vs2017-debinfo",
+      "displayName": "Visual Studio 15 - DebInfo",
+      "configurePreset": "vs2017",
+      "configuration": "RelWithDebInfo"
+    },
+    {
+      "name": "vs2015-debug",
+      "displayName": "Visual Studio 14 - Debug",
+      "configurePreset": "vs2015",
+      "configuration": "Debug"
+    },
+    {
+      "name": "vs2015-release",
+      "displayName": "Visual Studio 14 - Release",
+      "configurePreset": "vs2015",
+      "configuration": "Release"
+    },
+    {
+      "name": "vs2015-debinfo",
+      "displayName": "Visual Studio 14 - DebInfo",
+      "configurePreset": "vs2015",
+      "configuration": "RelWithDebInfo"
+    }
+  ]
+}
