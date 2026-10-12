@@ -1,55 +1,49 @@
-#include <iostream>
-#include <format>
 #include <SDL3/SDL.h>
-#include <vulkan/vulkan.h>
-#include <imgui.h>
-#include <backends/imgui_impl_sdl3.h>
-#include <backends/imgui_impl_vulkan.h>
-#include <glm/glm.hpp>
-#define GLM_ENABLE_EXPERIMENTAL
-#include <glm/gtx/string_cast.hpp>
-#include "stb_perlin.h"
 
-static VkInstance gInstance = VK_NULL_HANDLE;
+#include <print>
+#include <iostream>
 
 int main(int argc, char* argv[]) {
-	std::cout << "Hello, World!" << std::endl;
+#define setSDLMetaData(_name, _value) \
+if (!SDL_SetAppMetadataProperty(_name, _value)) { \
+	std::println(std::cerr, "Could not set metadata property {}. Error {}", #_name, SDL_GetError()); \
+	return -1; \
+}
 
-	// sdl test
-	if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD))
-		std::cerr << "Error: SDL_Init(): " << SDL_GetError() << std::endl;
-	else
+	setSDLMetaData(SDL_PROP_APP_METADATA_NAME_STRING, "CityExplorer");
+	setSDLMetaData(SDL_PROP_APP_METADATA_VERSION_STRING, "1.0.0");
+	setSDLMetaData(SDL_PROP_APP_METADATA_IDENTIFIER_STRING, "com.github.thundersphun.CityExplorer");
+	setSDLMetaData(SDL_PROP_APP_METADATA_CREATOR_STRING, "ThunderSphun");
+	setSDLMetaData(SDL_PROP_APP_METADATA_URL_STRING, "https://github.com/ThunderSphun/CityExplorer");
+	setSDLMetaData(SDL_PROP_APP_METADATA_TYPE_STRING, "game");
+
+#undef setSDLMetaData
+
+	if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
+		std::println(std::cerr, "Could not initialize SDL. Error {}", SDL_GetError());
+		return -1;
+	}
+
+	SDL_Window* window = SDL_CreateWindow("CityExplorer", 1920, 1080, 0);
+	if (!window) {
+		std::println(std::cerr, "Could not create a window. Error {}", SDL_GetError());
 		SDL_Quit();
+		return -1;
+	}
 
-	glm::vec4 glmTest{0, 1, 2, 3};
-	std::cout << glm::to_string(glmTest) << std::endl;
+	bool running = true;
+	while (running) {
+		SDL_Event event;
+		while (SDL_PollEvent(&event)) {
+			if (event.type == SDL_EVENT_QUIT)
+				running = false;
+			if (event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED && event.window.windowID == SDL_GetWindowID(window))
+				running = false;
+		}
+	}
 
-	ImVec2 imguiTest = {1, 2};
-	std::cout << std::format("ImVec2({}, {})", imguiTest[0], imguiTest[1]) << std::endl;
-
-	std::cout << stb_perlin_noise3(0, 0, 0, 0, 0, 0) << std::endl;
-
-#ifdef BUILD_DEBUG
-	std::cout << "BUILD_DEBUG is set" << std::endl;
-#endif
-#ifdef BUILD_NDEBUG
-	std::cout << "BUILD_NDEBUG is set" << std::endl;
-#endif
-#ifdef BUILD_RELEASE
-	std::cout << "BUILD_RELEASE is set" << std::endl;
-#endif
-#ifdef BUILD_NRELEASE
-	std::cout << "BUILD_NRELEASE is set" << std::endl;
-#endif
-#ifdef BUILD_DEBINFO
-	std::cout << "BUILD_DEBINFO is set" << std::endl;
-#endif
-#ifdef BUILD_NDEBINFO
-	std::cout << "BUILD_NDEBINFO is set" << std::endl;
-#endif
+	SDL_DestroyWindow(window);
+	SDL_Quit();
 
 	return 0;
 }
-
-#define STB_PERLIN_IMPLEMENTATION
-#include "stb_perlin.h"
