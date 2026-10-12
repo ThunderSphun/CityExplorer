@@ -70,12 +70,12 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
 
 target_compile_definitions(${PROJECT_NAME} PRIVATE
 	$<$<CONFIG:Debug>:BUILD_DEBUG>
-	$<$<CONFIG:Release>:BUILD_RELEASE>
 	$<$<CONFIG:RelWithDebInfo>:BUILD_DEBINFO>
+	$<$<CONFIG:Release>:BUILD_RELEASE>
 
 	$<$<NOT:$<CONFIG:Debug>>:BUILD_NDEBUG>
-	$<$<NOT:$<CONFIG:Release>>:BUILD_NRELEASE>
 	$<$<NOT:$<CONFIG:RelWithDebInfo>>:BUILD_NDEBINFO>
+	$<$<NOT:$<CONFIG:Release>>:BUILD_NRELEASE>
 )
 
 set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT ${PROJECT_NAME})
