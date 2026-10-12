@@ -24,7 +24,7 @@ if (!SDL_SetAppMetadataProperty(_name, _value)) { \
 		return -1;
 	}
 
-	SDL_Window* window = SDL_CreateWindow("CityExplorer", 1920, 1080, 0);
+	SDL_Window* window = SDL_CreateWindow("CityExplorer", 1920, 1080, SDL_WINDOW_RESIZABLE);
 	if (!window) {
 		std::println(std::cerr, "Could not create a window. Error {}", SDL_GetError());
 		SDL_Quit();
