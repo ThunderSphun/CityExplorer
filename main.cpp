@@ -189,7 +189,9 @@ shutdown:
 }
 
 void run() {
-	for (int i = 0; i < 120; i++) {
+	int i = 0;
+	const char* videoDriver = SDL_GetCurrentVideoDriver();
+	while(i < 120) {
 		SDL_Event event;
 		while (SDL_PollEvent(&event)) {
 			if (event.type == SDL_EVENT_QUIT)
@@ -197,6 +199,11 @@ void run() {
 			if (event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED && event.window.windowID == SDL_GetWindowID(window))
 				i = 120;
 		}
+		// run for 120 frames on wayland
+		// dirty fix to have the application be able to be closed easily
+		// wayland only shows a window when the first buffer is submitted
+		if (videoDriver && strcmp(videoDriver, "wayland") == 0)
+			i++;
 	}
 }
 
