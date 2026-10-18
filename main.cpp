@@ -6,6 +6,7 @@
 #include <format>
 #include <iostream>
 #include <expected>
+#include <algorithm>
 
 SDL_Window* window;
 vk::Instance instance;
@@ -97,8 +98,8 @@ bool initVulkan() {
 #ifdef BUILD_DEBUG
 		std::println("checking extension property {} required by SDL", SDL_Extensions[i]);
 #endif
-		if (std::ranges::none_of(
-				*extensionProperties,
+		if (std::none_of(
+				extensionProperties->begin(), extensionProperties->end(),
 				[extension = SDL_Extensions[i]](auto const& extensionProperty) {
 					return strcmp(extensionProperty.extensionName, extension) == 0;
 				}
