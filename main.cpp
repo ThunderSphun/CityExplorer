@@ -86,39 +86,67 @@ bool initVulkan() {
 		.apiVersion         = vk::ApiVersion14,
 	};
 
-	uint32_t sdlExtensionCount = 0;
-	const char* const* SDL_Extensions = SDL_Vulkan_GetInstanceExtensions(&sdlExtensionCount);
 	auto extensionProperties = vk::enumerateInstanceExtensionProperties();
 	if (!extensionProperties) {
 		std::println(std::cerr, "Could not load instance extension properties");
 		return false;
 	}
 
+#ifdef BUILD_DEBUG
+	for (const auto& extension : *extensionProperties)
+		std::println("Got available extension property {}", extension.extensionName.data());
+#endif
+
+	std::vector<const char*> extensions;
+
+	uint32_t sdlExtensionCount = 0;
+	const char* const* sdlExtensions = SDL_Vulkan_GetInstanceExtensions(&sdlExtensionCount);
+	extensions.reserve(sdlExtensionCount);
+
 	for (uint32_t i = 0; i < sdlExtensionCount; i++) {
 #ifdef BUILD_DEBUG
-		std::println("checking extension property {} required by SDL", SDL_Extensions[i]);
+		std::println("checking extension property {} required by SDL", sdlExtensions[i]);
 #endif
 		if (std::none_of(
 				extensionProperties->begin(), extensionProperties->end(),
-				[extension = SDL_Extensions[i]](auto const& extensionProperty) {
+				[extension = sdlExtensions[i]](auto const& extensionProperty) {
 					return strcmp(extensionProperty.extensionName, extension) == 0;
 				}
 			)
 		) {
-			std::println(std::cerr, "Vulkan does not have the required extension property {} required by SDL", SDL_Extensions[i]);
+			std::println(std::cerr, "Vulkan does not have the required extension property {} required by SDL", sdlExtensions[i]);
 			return false;
-		}
+		} else
+			extensions.push_back(sdlExtensions[i]);
 	}
+
 	vk::InstanceCreateInfo createInfo{
 		.pApplicationInfo = &appInfo,
-		.enabledExtensionCount = sdlExtensionCount,
-		.ppEnabledExtensionNames = SDL_Extensions,
+		.enabledExtensionCount = (uint32_t) extensions.size(),
+		.ppEnabledExtensionNames = extensions.data(),
 	};
 	std::expected<vk::Instance, vk::Result> _instance = vk::createInstance(createInfo);
 	if (_instance)
 		instance = *_instance;
-	else {
-		std::println(std::cerr, "Could not create vulkan instance");
+	else if (_instance.error() == vk::Result::eErrorIncompatibleDriver) {
+		// this is an attempt to fix incompatibility between vulkan and macOS moltenVK
+		extensions.push_back(vk::KHRPortabilityEnumerationExtensionName);
+
+		vk::InstanceCreateInfo createInfo{
+			.flags = vk::InstanceCreateFlagBits::eEnumeratePortabilityKHR,
+			.pApplicationInfo = &appInfo,
+			.enabledExtensionCount = (uint32_t) extensions.size(),
+			.ppEnabledExtensionNames = extensions.data(),
+		};
+
+		_instance = vk::createInstance(createInfo);
+	}
+
+	// try to assign again if the macOS fix was needed
+	if (_instance && !instance)
+		instance = *_instance;
+	else if (!_instance) {
+		std::println(std::cerr, "Could not create vulkan instance {}", vk::to_string(_instance.error()));
 		return false;
 	}
 
