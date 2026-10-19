@@ -7,11 +7,13 @@
 #include <iostream>
 #include <expected>
 #include <algorithm>
+#include <map>
 
 SDL_Window* window;
 vk::Instance instance;
 #ifdef BUILD_NRELEASE
 vk::DebugUtilsMessengerEXT debugMessenger;
+vk::PhysicalDevice physicalDevice;
 
 VKAPI_ATTR vk::Bool32 VKAPI_CALL debugCallback(
 	vk::DebugUtilsMessageSeverityFlagBitsEXT severity,
@@ -99,7 +101,7 @@ bool initVulkan() {
 		auto extensionProperties = vk::enumerateInstanceExtensionProperties();
 		if (!extensionProperties) {
 			std::println(std::cerr, "Could not load instance extension properties");
-			return false;
+			goto cleanup;
 		}
 
 #ifdef BUILD_DEBUG
@@ -145,9 +147,7 @@ bool initVulkan() {
 		auto layerProperties = vk::enumerateInstanceLayerProperties();
 		if (!layerProperties) {
 			std::println(std::cerr, "Could not load instance layer properties");
-			instance.destroy();
-			instance = nullptr;
-			return false;
+			goto cleanup;
 		}
 
 #ifdef BUILD_DEBUG
@@ -170,9 +170,7 @@ bool initVulkan() {
 				)
 			) {
 				std::println(std::cerr, "Vulkan does not have the required layer property {}", layers[i]);
-				instance.destroy();
-				instance = nullptr;
-				return false;
+				goto cleanup;
 			}
 		}
 #endif // BUILD_NRELEASE
@@ -212,41 +210,102 @@ bool initVulkan() {
 			instance = *_instance;
 		else if (!_instance) {
 			std::println(std::cerr, "Could not create vulkan instance {}", vk::to_string(_instance.error()));
-			return false;
+			goto cleanup_instance;
 		}
 		VULKAN_HPP_DEFAULT_DISPATCHER.init(instance);
 	}
 
+	{
 #ifdef BUILD_NRELEASE
-	vk::DebugUtilsMessageSeverityFlagsEXT severityFlags(
+		vk::DebugUtilsMessageSeverityFlagsEXT severityFlags(
 #ifdef BUILD_DEBUG
-		vk::DebugUtilsMessageSeverityFlagBitsEXT::eVerbose |
-		vk::DebugUtilsMessageSeverityFlagBitsEXT::eInfo |
+			vk::DebugUtilsMessageSeverityFlagBitsEXT::eVerbose |
+			vk::DebugUtilsMessageSeverityFlagBitsEXT::eInfo |
 #endif
-		vk::DebugUtilsMessageSeverityFlagBitsEXT::eWarning |
-		vk::DebugUtilsMessageSeverityFlagBitsEXT::eError
-	);
-	vk::DebugUtilsMessageTypeFlagsEXT typeFlags(
+			vk::DebugUtilsMessageSeverityFlagBitsEXT::eWarning |
+			vk::DebugUtilsMessageSeverityFlagBitsEXT::eError
+		);
+		vk::DebugUtilsMessageTypeFlagsEXT typeFlags(
 #ifdef BUILD_DEBUG
-		vk::DebugUtilsMessageTypeFlagBitsEXT::eGeneral |
+			vk::DebugUtilsMessageTypeFlagBitsEXT::eGeneral |
 #endif
-		vk::DebugUtilsMessageTypeFlagBitsEXT::eValidation |
-		vk::DebugUtilsMessageTypeFlagBitsEXT::ePerformance
-	);
-	vk::DebugUtilsMessengerCreateInfoEXT debugMessengerCreateInfo{
-		.messageSeverity = severityFlags,
-		.messageType = typeFlags,
-		.pfnUserCallback = &debugCallback,
-	};
+			vk::DebugUtilsMessageTypeFlagBitsEXT::eValidation |
+			vk::DebugUtilsMessageTypeFlagBitsEXT::ePerformance
+		);
+		vk::DebugUtilsMessengerCreateInfoEXT debugMessengerCreateInfo{
+			.messageSeverity = severityFlags,
+			.messageType = typeFlags,
+			.pfnUserCallback = &debugCallback,
+		};
 
-	std::expected<vk::DebugUtilsMessengerEXT, vk::Result> _debugMessenger = instance.createDebugUtilsMessengerEXT(debugMessengerCreateInfo);
-	if (_debugMessenger)
-		debugMessenger = *_debugMessenger;
-	else
-		std::println(std::cerr, "Could not create a debug messenger, continuing without");
+		std::expected<vk::DebugUtilsMessengerEXT, vk::Result> _debugMessenger = instance.createDebugUtilsMessengerEXT(debugMessengerCreateInfo);
+		if (_debugMessenger)
+			debugMessenger = *_debugMessenger;
+		else
+			std::println(std::cerr, "Could not create a debug messenger, continuing without");
 #endif
+	}
+
+	{
+		auto physicalDevices = instance.enumeratePhysicalDevices();
+		if (!physicalDevices || physicalDevices->empty()) {
+			std::println(std::cerr, "Failed to find GPU with Vulkan support");
+			goto cleanup_debugMessenger;
+		}
+
+		std::multimap<int32_t, vk::PhysicalDevice> candidates;
+
+		for (const vk::PhysicalDevice& pd : *physicalDevices) {
+			vk::PhysicalDeviceProperties2 properties = pd.getProperties2();
+			vk::PhysicalDeviceFeatures2 features = pd.getFeatures2();
+
+#ifdef BUILD_DEBUG
+			std::println("checking physical device {}", properties.properties.deviceName.data());
+#endif
+			int32_t score = 0;
+
+			if (properties.properties.apiVersion < vk::ApiVersion13)
+				score -= 1000;
+
+			if (properties.properties.deviceType == vk::PhysicalDeviceType::eDiscreteGpu)
+				score += 1000;
+
+			score += properties.properties.limits.maxImageDimension2D;
+
+			candidates.insert(std::make_pair(score, pd));
+		}
+
+		if (candidates.empty()) {
+			std::println(std::cerr, "Could not find any suitable device");
+			goto cleanup_debugMessenger;
+		}
+		if (candidates.rbegin()->first < 0) {
+			std::println("Found device {} as best candidate, device has negative score",
+				candidates.rbegin()->second.getProperties2().properties.deviceName.data());
+			goto cleanup_debugMessenger;
+		} else if (candidates.rbegin()->first == 0)
+			std::println("Found device {} as best candidate, device has a score of 0",
+				candidates.rbegin()->second.getProperties2().properties.deviceName.data());
+		else
+			std::println("Found device {} as best candidate",
+				candidates.rbegin()->second.getProperties2().properties.deviceName.data());
+
+		physicalDevice = candidates.rbegin()->second;
+	}
 
 	return true;
+
+cleanup_debugMessenger:
+	if (debugMessenger)
+		instance.destroyDebugUtilsMessengerEXT(debugMessenger);
+	debugMessenger = nullptr;
+
+cleanup_instance:
+	instance.destroy();
+	instance = nullptr;
+
+cleanup:
+	return false;
 }
 
 void shutdownSDL() {
@@ -268,23 +327,23 @@ void shutdownVulkan() {
 bool init() {
 	if (!initSDL()) {
 		std::println(std::cerr, "Could not initialize SDL3");
-		goto shutdown;
+		goto cleanup;
 	}
 
 	if (!initVulkan()) {
 		std::println(std::cerr, "Could not initialize Vulkan");
-		goto shutdown_SDL;
+		goto cleanup_SDL;
 	}
 
 	return true;
 
-shutdown_Vulkan:
+cleanup_Vulkan:
 	shutdownVulkan();
 
-shutdown_SDL:
+cleanup_SDL:
 	shutdownSDL();
 
-shutdown:
+cleanup:
 	return false;
 }
 
