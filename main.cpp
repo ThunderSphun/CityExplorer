@@ -306,7 +306,7 @@ bool initVulkan() {
 					}))
 				continue;
 
-			auto features = physicalDevice.getFeatures2<
+			auto features = pd.getFeatures2<
 				vk::PhysicalDeviceFeatures2,
 				vk::PhysicalDeviceVulkan11Features,
 				vk::PhysicalDeviceVulkan13Features,
