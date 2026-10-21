@@ -306,6 +306,20 @@ bool initVulkan() {
 					}))
 				continue;
 
+			auto features = physicalDevice.getFeatures2<
+				vk::PhysicalDeviceFeatures2,
+				vk::PhysicalDeviceVulkan11Features,
+				vk::PhysicalDeviceVulkan13Features,
+				vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT
+			>();
+
+			if (!features.get<vk::PhysicalDeviceVulkan11Features>().shaderDrawParameters)
+				continue;
+			if (!features.get<vk::PhysicalDeviceVulkan13Features>().dynamicRendering)
+				continue;
+			if (!features.get<vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT>().extendedDynamicState)
+				continue;
+
 			physicalDevice = pd;
 		}
 
