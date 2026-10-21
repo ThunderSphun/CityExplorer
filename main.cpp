@@ -7,7 +7,6 @@
 #include <iostream>
 #include <expected>
 #include <algorithm>
-#include <map>
 
 SDL_Window* window;
 vk::Instance instance;
@@ -253,47 +252,79 @@ bool initVulkan() {
 			goto cleanup_debugMessenger;
 		}
 
-		std::multimap<int32_t, vk::PhysicalDevice> candidates;
+		std::vector<const char*> requiredExtensions{
+			vk::KHRSwapchainExtensionName,
+		};
 
 		for (const vk::PhysicalDevice& pd : *physicalDevices) {
-			vk::PhysicalDeviceProperties2 properties = pd.getProperties2();
-			vk::PhysicalDeviceFeatures2 features = pd.getFeatures2();
+			if (physicalDevice && physicalDevice.getProperties2().properties.deviceType == vk::PhysicalDeviceType::eDiscreteGpu)
+				break;
+
+			// if a device has already been chosen,
+			// don't evaluate the other ones if it is not a dedicated gpu
+			if (physicalDevice)
+				continue;
 
 #ifdef BUILD_DEBUG
-			std::println("checking physical device {}", properties.properties.deviceName.data());
+			std::println("checking physical device {}", pd.getProperties2().properties.deviceName.data());
 #endif
-			int32_t score = 0;
 
-			if (properties.properties.apiVersion < vk::ApiVersion13)
-				score -= 1000;
+#ifdef BUILD_DEBUG
+			std::println("  checking api version");
+#endif
+			if (pd.getProperties2().properties.apiVersion < vk::ApiVersion13)
+				continue;
 
-			if (properties.properties.deviceType == vk::PhysicalDeviceType::eDiscreteGpu)
-				score += 1000;
+#ifdef BUILD_DEBUG
+			std::println("  checking queueFamilies");
+#endif
+			std::vector<vk::QueueFamilyProperties2> queueFamilies = pd.getQueueFamilyProperties2();
+			if (std::none_of(queueFamilies.begin(), queueFamilies.end(),
+					[](const vk::QueueFamilyProperties2& queueFamily) {
+						return (queueFamily.queueFamilyProperties.queueFlags & vk::QueueFlagBits::eGraphics) == vk::QueueFlagBits::eGraphics;
+					}))
+				continue;
 
-			score += properties.properties.limits.maxImageDimension2D;
+#ifdef BUILD_DEBUG
+			std::println("  checking device extensions");
+#endif
+			auto deviceExtensions = pd.enumerateDeviceExtensionProperties();
+			if (!deviceExtensions)
+				continue;
 
-			candidates.insert(std::make_pair(score, pd));
+#ifdef BUILD_DEBUG
+			for (const auto& deviceExtension : *deviceExtensions)
+				std::println("    {}", deviceExtension.extensionName.data());
+#endif
+
+			if (!std::all_of(requiredExtensions.begin(), requiredExtensions.end(),
+					[deviceExtensions](const auto& requiredExtension) {
+						return std::any_of(deviceExtensions->begin(), deviceExtensions->end(),
+							[requiredExtension](const auto& deviceExtension) {
+								return std::strcmp(deviceExtension.extensionName, requiredExtension) == 0;
+							});
+					}))
+				continue;
+
+			physicalDevice = pd;
 		}
 
-		if (candidates.empty()) {
+		if (!physicalDevice) {
 			std::println(std::cerr, "Could not find any suitable device");
 			goto cleanup_debugMessenger;
 		}
-		if (candidates.rbegin()->first < 0) {
-			std::println("Found device {} as best candidate, device has negative score",
-				candidates.rbegin()->second.getProperties2().properties.deviceName.data());
-			goto cleanup_debugMessenger;
-		} else if (candidates.rbegin()->first == 0)
-			std::println("Found device {} as best candidate, device has a score of 0",
-				candidates.rbegin()->second.getProperties2().properties.deviceName.data());
-		else
-			std::println("Found device {} as best candidate",
-				candidates.rbegin()->second.getProperties2().properties.deviceName.data());
 
-		physicalDevice = candidates.rbegin()->second;
+#ifdef BUILD_NRELEASE
+			std::println("Found physical device {} of type {}",
+				physicalDevice.getProperties2().properties.deviceName.data(),
+				vk::to_string(physicalDevice.getProperties2().properties.deviceType));
+#endif
 	}
 
 	return true;
+
+cleanup_physicalDevice:
+	physicalDevice = nullptr;
 
 cleanup_debugMessenger:
 	if (debugMessenger)
@@ -316,6 +347,8 @@ void shutdownSDL() {
 }
 
 void shutdownVulkan() {
+	physicalDevice = nullptr;
+
 	if (debugMessenger)
 		instance.destroyDebugUtilsMessengerEXT(debugMessenger);
 	debugMessenger = nullptr;
