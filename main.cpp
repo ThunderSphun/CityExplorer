@@ -96,125 +96,124 @@ if (!SDL_SetAppMetadataProperty(_name, _value)) { \
 	return true;
 }
 
-bool initVulkan() {
-	VULKAN_HPP_DEFAULT_DISPATCHER.init();
-	{
-		auto extensionProperties = vk::enumerateInstanceExtensionProperties();
-		if (!extensionProperties) {
-			std::println(std::cerr, "Could not load instance extension properties");
-			goto cleanup;
-		}
+static bool createVulkanInstance() {
+	const vk::ApplicationInfo appInfo{
+		.pApplicationName = "CityExplorer",
+		.applicationVersion = vk::makeApiVersion(0, 1, 0, 0),
+		.pEngineName = "No Engine",
+		.engineVersion = vk::makeApiVersion(0, 1, 0, 0),
+		.apiVersion = vk::ApiVersion14,
+	};
+
+	std::expected<std::vector<vk::ExtensionProperties>, vk::Result> extensionProperties = vk::enumerateInstanceExtensionProperties();
+	if (!extensionProperties) {
+		std::println(std::cerr, "Could not load instance extension properties");
+		return false;
+	}
 
 #ifdef BUILD_DEBUG
-		for (const auto& extension : *extensionProperties)
-			std::println("Got available extension property {}", extension.extensionName.data());
+	for (const vk::ExtensionProperties& extension : *extensionProperties)
+		std::println("Got available extension property {}", extension.extensionName.data());
 #endif
 
-		std::vector<const char*> extensions;
+	std::vector<const char*> extensions;
 #ifdef BUILD_NRELEASE
-		extensions.emplace_back(vk::EXTDebugUtilsExtensionName);
+	extensions.emplace_back(vk::EXTDebugUtilsExtensionName);
 #endif
 
-		uint32_t sdlExtensionCount = 0;
-		const char* const* sdlExtensions = SDL_Vulkan_GetInstanceExtensions(&sdlExtensionCount);
-		extensions.reserve(sdlExtensionCount);
+	uint32_t sdlExtensionCount = 0;
+	const char* const* sdlExtensions = SDL_Vulkan_GetInstanceExtensions(&sdlExtensionCount);
+	if (sdlExtensions == nullptr) {
+		std::println(std::cerr, "Could not load required vulkan extensions from SDL {}", SDL_GetError());
+		return false;
+	}
+	extensions.reserve(sdlExtensionCount);
 
-		for (uint32_t i = 0; i < sdlExtensionCount; i++) {
+	for (uint32_t i = 0; i < sdlExtensionCount; i++) {
 #ifdef BUILD_DEBUG
-			std::println("checking extension property {} required by SDL", sdlExtensions[i]);
+		std::println("checking extension property {} required by SDL", sdlExtensions[i]);
 #endif
-			if (std::none_of(
-					extensionProperties->begin(), extensionProperties->end(),
-					[extension = sdlExtensions[i]](auto const& extensionProperty) {
-						return strcmp(extensionProperty.extensionName, extension) == 0;
-					}
-				)
-			) {
-				std::println(std::cerr, "Vulkan does not have the required extension property {} required by SDL", sdlExtensions[i]);
-				return false;
-			} else
-				extensions.emplace_back(sdlExtensions[i]);
-		}
+		if (std::none_of(
+			extensionProperties->begin(), extensionProperties->end(),
+			[extension = sdlExtensions[i]](auto const& extensionProperty) {
+				return strcmp(extensionProperty.extensionName, extension) == 0;
+		})) {
+			std::println(std::cerr, "Vulkan does not have the required extension property {} required by SDL", sdlExtensions[i]);
+			return false;
+		} else
+			extensions.emplace_back(sdlExtensions[i]);
+	}
 
-		const vk::ApplicationInfo appInfo{
-			.pApplicationName   = "CityExplorer",
-			.applicationVersion = 1,
-			.pEngineName        = "No Engine",
-			.engineVersion      = 1,
-			.apiVersion         = vk::ApiVersion14,
-		};
 
+	std::expected<std::vector<vk::LayerProperties>, vk::Result> layerProperties = vk::enumerateInstanceLayerProperties();
+	if (!layerProperties) {
+		std::println(std::cerr, "Could not load instance layer properties");
+		return false;
+	}
+
+#ifdef BUILD_DEBUG
+	for (const vk::LayerProperties& layer : *layerProperties)
+		std::println("Got available layer property {}", layer.layerName.data());
+#endif
+
+	const char* layers[] = {
 #ifdef BUILD_NRELEASE
-		auto layerProperties = vk::enumerateInstanceLayerProperties();
-		if (!layerProperties) {
-			std::println(std::cerr, "Could not load instance layer properties");
-			goto cleanup;
-		}
+		"VK_LAYER_KHRONOS_validation",
+#endif
+	};
 
+	for (uint32_t i = 0; i < sizeof(layers) / sizeof(layers[0]); i++) {
 #ifdef BUILD_DEBUG
-		for (const auto& layer : *layerProperties)
-			std::println("Got available layer property {}", layer.layerName.data());
+		std::println("checking layer property {}", layers[i]);
 #endif
-		const char* layers[] = {
-			"VK_LAYER_KHRONOS_validation",
-		};
-
-		for (uint32_t i = 0; i < sizeof(layers) / sizeof(layers[0]); i++) {
-#ifdef BUILD_DEBUG
-			std::println("checking layer property {}", layers[i]);
-#endif
-			if (std::none_of(
-					layerProperties->begin(), layerProperties->end(),
-					[layer = layers[i]](auto const& layerProperty) {
-						return strcmp(layerProperty.layerName, layer) == 0;
-					}
-				)
-			) {
-				std::println(std::cerr, "Vulkan does not have the required layer property {}", layers[i]);
-				goto cleanup;
-			}
+		if (std::none_of(
+			layerProperties->begin(), layerProperties->end(),
+			[layer = layers[i]](auto const& layerProperty) {
+				return strcmp(layerProperty.layerName, layer) == 0;
+		})) {
+			std::println(std::cerr, "Vulkan does not have the required layer property {}", layers[i]);
+			return false;
 		}
-#endif // BUILD_NRELEASE
+	}
 
-		vk::InstanceCreateInfo createInfo{
-			.pApplicationInfo = &appInfo,
-#ifdef BUILD_NRELEASE
-			.enabledLayerCount = sizeof(layers) / sizeof(layers[0]),
-			.ppEnabledLayerNames = layers,
-#endif
-			.enabledExtensionCount = (uint32_t) extensions.size(),
-			.ppEnabledExtensionNames = extensions.data(),
-		};
-		std::expected<vk::Instance, vk::Result> _instance = vk::createInstance(createInfo);
-		if (_instance)
-			instance = *_instance;
-		else if (_instance.error() == vk::Result::eErrorIncompatibleDriver) {
+	vk::InstanceCreateInfo createInfo{
+		.pApplicationInfo = &appInfo,
+		.enabledLayerCount = static_cast<uint32_t>(sizeof(layers) / sizeof(layers[0])),
+		.ppEnabledLayerNames = layers,
+		.enabledExtensionCount = (uint32_t) extensions.size(),
+		.ppEnabledExtensionNames = extensions.data(),
+	};
+
+	std::expected<vk::Instance, vk::Result> _instance = vk::createInstance(createInfo)
+		.or_else([createInfo, extensions](vk::Result result) mutable -> std::expected<vk::Instance, vk::Result> {
+			if (result != vk::Result::eErrorIncompatibleDriver)
+				return std::unexpected(result);
+
 			// this is an attempt to fix incompatibility between vulkan and macOS moltenVK
 			extensions.emplace_back(vk::KHRPortabilityEnumerationExtensionName);
 
-			vk::InstanceCreateInfo createInfo{
-				.flags = vk::InstanceCreateFlagBits::eEnumeratePortabilityKHR,
-				.pApplicationInfo = &appInfo,
-#ifdef BUILD_NRELEASE
-				.enabledLayerCount = sizeof(layers) / sizeof(layers[0]),
-				.ppEnabledLayerNames = layers,
-#endif
-				.enabledExtensionCount = (uint32_t) extensions.size(),
-				.ppEnabledExtensionNames = extensions.data(),
-			};
+			return vk::createInstance(createInfo
+				.setEnabledExtensionCount(static_cast<uint32_t>(extensions.size()))
+				.setPpEnabledExtensionNames(extensions.data())
+			);
+	});
 
-			_instance = vk::createInstance(createInfo);
-		}
-
-		// try to assign again if the macOS fix was needed
-		if (_instance && !instance)
-			instance = *_instance;
-		else if (!_instance) {
-			std::println(std::cerr, "Could not create vulkan instance {}", vk::to_string(_instance.error()));
-			goto cleanup_instance;
-		}
-		VULKAN_HPP_DEFAULT_DISPATCHER.init(instance);
+	if (_instance)
+		instance = *_instance;
+	else {
+		std::println(std::cerr, "Could not create vulkan instance {}", vk::to_string(_instance.error()));
+		return false;
 	}
+	return true;
+}
+
+bool initVulkan() {
+	VULKAN_HPP_DEFAULT_DISPATCHER.init();
+
+	if (!createVulkanInstance())
+		goto cleanup;
+
+	VULKAN_HPP_DEFAULT_DISPATCHER.init(instance);
 
 	{
 #ifdef BUILD_NRELEASE
@@ -267,7 +266,7 @@ bool initVulkan() {
 			if (physicalDevice)
 				continue;
 
-#ifdef BUILD_DEBUG
+#ifdef BUILD_NRELEASE
 			std::println("checking physical device {}", pd.getProperties2().properties.deviceName.data());
 #endif
 
