@@ -13,6 +13,8 @@ vk::Instance instance;
 #ifdef BUILD_NRELEASE
 vk::DebugUtilsMessengerEXT debugMessenger;
 vk::PhysicalDevice physicalDevice;
+vk::Device logicalDevice;
+vk::Queue graphicsQueue;
 
 VKAPI_ATTR vk::Bool32 VKAPI_CALL debugCallback(
 	vk::DebugUtilsMessageSeverityFlagBitsEXT severity,
@@ -241,7 +243,7 @@ bool initVulkan() {
 		if (_debugMessenger)
 			debugMessenger = *_debugMessenger;
 		else
-			std::println(std::cerr, "Could not create a debug messenger, continuing without");
+			std::println(std::cerr, "Got error {} whilst creating debug messenger, continuing without", vk::to_string(_debugMessenger.error()));
 #endif
 	}
 
@@ -335,7 +337,71 @@ bool initVulkan() {
 #endif
 	}
 
+	{
+		float queuePriority = 0.5f;
+		vk::DeviceQueueCreateInfo deviceQueueCreateInfo{
+			.queueCount = 1,
+			.pQueuePriorities = &queuePriority,
+		};
+		{
+			std::vector<vk::QueueFamilyProperties2> queueFamilyProperties = physicalDevice.getQueueFamilyProperties2();
+			for (size_t i = 0; i < queueFamilyProperties.size(); i++) {
+				if ((queueFamilyProperties[i].queueFamilyProperties.queueFlags & vk::QueueFlagBits::eGraphics) == vk::QueueFlagBits::eGraphics) {
+					deviceQueueCreateInfo.setQueueFamilyIndex(i);
+					break;
+				}
+			}
+		}
+
+		vk::StructureChain<
+			vk::PhysicalDeviceFeatures2,
+			vk::PhysicalDeviceVulkan11Features,
+			vk::PhysicalDeviceVulkan13Features,
+			vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT
+		> featureChain{
+			{},
+			{
+				.shaderDrawParameters = true,
+			},
+			{
+				.dynamicRendering = true,
+			},
+			{
+				.extendedDynamicState = true,
+			},
+		};
+
+		std::vector<const char*> requiredExtensions{
+			vk::KHRSwapchainExtensionName,
+		};
+
+		vk::DeviceCreateInfo deviceCreateInfo{
+			.pNext = &featureChain.get<vk::PhysicalDeviceFeatures2>(),
+			.queueCreateInfoCount = 1,
+			.pQueueCreateInfos = &deviceQueueCreateInfo,
+			.enabledExtensionCount = static_cast<uint32_t>(requiredExtensions.size()),
+			.ppEnabledExtensionNames = requiredExtensions.data(),
+		};
+
+		std::expected<vk::Device, vk::Result> _logicalDevice = physicalDevice.createDevice(deviceCreateInfo);
+		if (_logicalDevice)
+			logicalDevice = *_logicalDevice;
+		else {
+			std::println(std::cerr, "Got error {} whilst creating a logical device", vk::to_string(_logicalDevice.error()));
+			goto cleanup_physicalDevice;
+		}
+
+		graphicsQueue = logicalDevice.getQueue(deviceQueueCreateInfo.queueFamilyIndex, 0);
+	}
+
 	return true;
+
+cleanup_graphicsQueue:
+	graphicsQueue = nullptr;
+
+cleanup_logicalDevice:
+	logicalDevice.destroy();
+	logicalDevice = nullptr;
 
 cleanup_physicalDevice:
 	physicalDevice = nullptr;
@@ -361,6 +427,11 @@ void shutdownSDL() {
 }
 
 void shutdownVulkan() {
+	graphicsQueue = nullptr;
+
+	logicalDevice.destroy();
+	logicalDevice = nullptr;
+
 	physicalDevice = nullptr;
 
 	if (debugMessenger)
