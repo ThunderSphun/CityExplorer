@@ -336,20 +336,7 @@ bool loadPhysicalDevice() {
 	return true;
 }
 
-bool initVulkan() {
-	VULKAN_HPP_DEFAULT_DISPATCHER.init();
-
-	if (!createVulkanInstance())
-		goto cleanup;
-
-	VULKAN_HPP_DEFAULT_DISPATCHER.init(instance);
-
-	setupDebugMessenger();
-
-	if (!loadPhysicalDevice())
-		goto cleanup_debugMessenger;
-
-	{
+bool createLogicalDevice() {
 		float queuePriority = 0.5f;
 		vk::DeviceQueueCreateInfo deviceQueueCreateInfo{
 			.queueCount = 1,
@@ -372,15 +359,9 @@ bool initVulkan() {
 			vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT
 		> featureChain{
 			{},
-			{
-				.shaderDrawParameters = true,
-			},
-			{
-				.dynamicRendering = true,
-			},
-			{
-				.extendedDynamicState = true,
-			},
+		{ .shaderDrawParameters = true, },
+		{ .dynamicRendering = true, },
+		{ .extendedDynamicState = true, },
 		};
 
 		std::vector<const char*> requiredExtensions{
@@ -400,15 +381,35 @@ bool initVulkan() {
 			logicalDevice = *_logicalDevice;
 		else {
 			std::println(std::cerr, "Got error {} whilst creating a logical device", vk::to_string(_logicalDevice.error()));
-			goto cleanup_physicalDevice;
+		return false;
 		}
 
 		graphicsQueue = logicalDevice.getQueue(deviceQueueCreateInfo.queueFamilyIndex, 0);
+
+	return true;
 	}
+
+bool initVulkan() {
+	VULKAN_HPP_DEFAULT_DISPATCHER.init();
+
+	if (!createVulkanInstance())
+		goto cleanup;
+
+	VULKAN_HPP_DEFAULT_DISPATCHER.init(instance);
+
+	setupDebugMessenger();
+
+	if (!loadPhysicalDevice())
+		goto cleanup_debugMessenger;
+
+	VULKAN_HPP_DEFAULT_DISPATCHER.init(physicalDevice);
+
+	if (!createLogicalDevice())
+		goto cleanup_logicalDevice;
 
 	return true;
 
-cleanup_graphicsQueue:
+cleanup_logicalDevice:
 	graphicsQueue = nullptr;
 
 cleanup_logicalDevice:
