@@ -12,6 +12,7 @@ SDL_Window* window;
 vk::Instance instance;
 #ifdef BUILD_NRELEASE
 vk::DebugUtilsMessengerEXT debugMessenger;
+vk::SurfaceKHR surface;
 vk::PhysicalDevice physicalDevice;
 vk::Device logicalDevice;
 vk::Queue graphicsQueue;
@@ -64,7 +65,7 @@ if (!SDL_SetAppMetadataProperty(_name, _value)) { \
 		displayScale = 1.0f;
 	}
 
-	SDL_Window* window = SDL_CreateWindow("CityExplorer", 1280 * displayScale, 720 * displayScale, SDL_WINDOW_RESIZABLE | SDL_WINDOW_VULKAN | SDL_WINDOW_HIDDEN);
+	window = SDL_CreateWindow("CityExplorer", 1280 * displayScale, 720 * displayScale, SDL_WINDOW_RESIZABLE | SDL_WINDOW_VULKAN | SDL_WINDOW_HIDDEN);
 	if (!window) {
 		std::string errorMsg = std::format("Could not create a window. Error {}", SDL_GetError());
 		if (!SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Initialize error", errorMsg.c_str(), nullptr))
@@ -89,6 +90,8 @@ if (!SDL_SetAppMetadataProperty(_name, _value)) { \
 		std::string errorMsg = std::format("Could not show window\n{}", SDL_GetError());
 		if (!SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Window error", errorMsg.c_str(), nullptr))
 			std::println(std::cerr, "{}", errorMsg);
+		SDL_DestroyWindow(window);
+		window = nullptr;
 		SDL_Quit();
 		return false;
 	}
@@ -143,7 +146,6 @@ static bool createVulkanInstance() {
 		} else
 			extensions.emplace_back(sdlExtensions[i]);
 	}
-
 
 	std::expected<std::vector<vk::LayerProperties>, vk::Result> layerProperties = vk::enumerateInstanceLayerProperties();
 	if (!layerProperties) {
@@ -236,6 +238,17 @@ void setupDebugMessenger() {
 	else
 		std::println(std::cerr, "Got error {} whilst creating debug messenger, continuing without", vk::to_string(_debugMessenger.error()));
 #endif // BUILD_NRELEASE
+}
+
+bool createSurface() {
+	VkSurfaceKHR _surface;
+	if (!SDL_Vulkan_CreateSurface(window, instance, nullptr, &_surface)) {
+		std::println(std::cerr, "SDL could not create a vulkan surface {}", SDL_GetError());
+		return false;
+	}
+
+	surface = _surface;
+	return true;
 }
 
 bool isDeviceSuitable(const vk::PhysicalDevice& device) {
@@ -337,57 +350,66 @@ bool loadPhysicalDevice() {
 }
 
 bool createLogicalDevice() {
-		float queuePriority = 0.5f;
-		vk::DeviceQueueCreateInfo deviceQueueCreateInfo{
-			.queueCount = 1,
-			.pQueuePriorities = &queuePriority,
-		};
-		{
-			std::vector<vk::QueueFamilyProperties2> queueFamilyProperties = physicalDevice.getQueueFamilyProperties2();
-			for (size_t i = 0; i < queueFamilyProperties.size(); i++) {
-				if ((queueFamilyProperties[i].queueFamilyProperties.queueFlags & vk::QueueFlagBits::eGraphics) == vk::QueueFlagBits::eGraphics) {
-					deviceQueueCreateInfo.setQueueFamilyIndex(i);
-					break;
-				}
-			}
+	float queuePriority = 0.5f;
+	vk::DeviceQueueCreateInfo deviceQueueCreateInfo{
+		.queueCount = 1,
+		.pQueuePriorities = &queuePriority,
+	};
+	{
+		std::vector<vk::QueueFamilyProperties2> queueFamilyProperties = physicalDevice.getQueueFamilyProperties2();
+		for (size_t i = 0; i < queueFamilyProperties.size(); i++) {
+			if ((queueFamilyProperties[i].queueFamilyProperties.queueFlags & vk::QueueFlagBits::eGraphics) != vk::QueueFlagBits::eGraphics)
+				continue;
+
+			if (!physicalDevice.getSurfaceSupportKHR(i, surface))
+				continue;
+
+			deviceQueueCreateInfo.setQueueFamilyIndex(i);
+			break;
 		}
 
-		vk::StructureChain<
-			vk::PhysicalDeviceFeatures2,
-			vk::PhysicalDeviceVulkan11Features,
-			vk::PhysicalDeviceVulkan13Features,
-			vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT
-		> featureChain{
-			{},
+		if (deviceQueueCreateInfo.queueFamilyIndex == -1) {
+			std::println(std::cerr, "Could not find a queue which supports both graphics and presenting to the window");
+			return false;
+		}
+	}
+
+	vk::StructureChain<
+		vk::PhysicalDeviceFeatures2,
+		vk::PhysicalDeviceVulkan11Features,
+		vk::PhysicalDeviceVulkan13Features,
+		vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT
+	> featureChain{
+		{},
 		{ .shaderDrawParameters = true, },
 		{ .dynamicRendering = true, },
 		{ .extendedDynamicState = true, },
-		};
+	};
 
-		std::vector<const char*> requiredExtensions{
-			vk::KHRSwapchainExtensionName,
-		};
+	std::vector<const char*> requiredExtensions{
+		vk::KHRSwapchainExtensionName,
+	};
 
-		vk::DeviceCreateInfo deviceCreateInfo{
-			.pNext = &featureChain.get<vk::PhysicalDeviceFeatures2>(),
-			.queueCreateInfoCount = 1,
-			.pQueueCreateInfos = &deviceQueueCreateInfo,
-			.enabledExtensionCount = static_cast<uint32_t>(requiredExtensions.size()),
-			.ppEnabledExtensionNames = requiredExtensions.data(),
-		};
+	vk::DeviceCreateInfo deviceCreateInfo{
+		.pNext = &featureChain.get<vk::PhysicalDeviceFeatures2>(),
+		.queueCreateInfoCount = 1,
+		.pQueueCreateInfos = &deviceQueueCreateInfo,
+		.enabledExtensionCount = static_cast<uint32_t>(requiredExtensions.size()),
+		.ppEnabledExtensionNames = requiredExtensions.data(),
+	};
 
-		std::expected<vk::Device, vk::Result> _logicalDevice = physicalDevice.createDevice(deviceCreateInfo);
-		if (_logicalDevice)
-			logicalDevice = *_logicalDevice;
-		else {
-			std::println(std::cerr, "Got error {} whilst creating a logical device", vk::to_string(_logicalDevice.error()));
+	std::expected<vk::Device, vk::Result> _logicalDevice = physicalDevice.createDevice(deviceCreateInfo);
+	if (_logicalDevice)
+		logicalDevice = *_logicalDevice;
+	else {
+		std::println(std::cerr, "Got error {} whilst creating a logical device", vk::to_string(_logicalDevice.error()));
 		return false;
-		}
+	}
 
-		graphicsQueue = logicalDevice.getQueue(deviceQueueCreateInfo.queueFamilyIndex, 0);
+	graphicsQueue = logicalDevice.getQueue(deviceQueueCreateInfo.queueFamilyIndex, 0);
 
 	return true;
-	}
+}
 
 bool initVulkan() {
 	VULKAN_HPP_DEFAULT_DISPATCHER.init();
@@ -399,25 +421,32 @@ bool initVulkan() {
 
 	setupDebugMessenger();
 
-	if (!loadPhysicalDevice())
+	if (!createSurface())
 		goto cleanup_debugMessenger;
 
-	VULKAN_HPP_DEFAULT_DISPATCHER.init(physicalDevice);
+	if (!loadPhysicalDevice())
+		goto cleanup_surface;
+
 
 	if (!createLogicalDevice())
 		goto cleanup_logicalDevice;
+
+	VULKAN_HPP_DEFAULT_DISPATCHER.init(logicalDevice);
 
 	return true;
 
 cleanup_logicalDevice:
 	graphicsQueue = nullptr;
 
-cleanup_logicalDevice:
 	logicalDevice.destroy();
 	logicalDevice = nullptr;
 
 cleanup_physicalDevice:
 	physicalDevice = nullptr;
+
+cleanup_surface:
+	SDL_Vulkan_DestroySurface(instance, surface, nullptr);
+	surface = nullptr;
 
 cleanup_debugMessenger:
 	if (debugMessenger)
@@ -446,6 +475,8 @@ void shutdownVulkan() {
 	logicalDevice = nullptr;
 
 	physicalDevice = nullptr;
+
+	SDL_Vulkan_DestroySurface(instance, surface, nullptr);
 
 	if (debugMessenger)
 		instance.destroyDebugUtilsMessengerEXT(debugMessenger);
