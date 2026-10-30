@@ -135,7 +135,7 @@ static bool createVulkanInstance() {
 #endif
 		if (std::none_of(
 			extensionProperties->begin(), extensionProperties->end(),
-			[extension = sdlExtensions[i]](auto const& extensionProperty) {
+			[extension = sdlExtensions[i]](const vk::ExtensionProperties& extensionProperty) {
 				return strcmp(extensionProperty.extensionName, extension) == 0;
 		})) {
 			std::println(std::cerr, "Vulkan does not have the required extension property {} required by SDL", sdlExtensions[i]);
@@ -168,7 +168,7 @@ static bool createVulkanInstance() {
 #endif
 		if (std::none_of(
 			layerProperties->begin(), layerProperties->end(),
-			[layer = layers[i]](auto const& layerProperty) {
+			[layer = layers[i]](const vk::LayerProperties& layerProperty) {
 				return strcmp(layerProperty.layerName, layer) == 0;
 		})) {
 			std::println(std::cerr, "Vulkan does not have the required layer property {}", layers[i]);
@@ -204,6 +204,104 @@ static bool createVulkanInstance() {
 		std::println(std::cerr, "Could not create vulkan instance {}", vk::to_string(_instance.error()));
 		return false;
 	}
+	return true;
+}
+
+bool isDeviceSuitable(const vk::PhysicalDevice& device) {
+	const std::vector<const char*> requiredExtensions{
+		vk::KHRSwapchainExtensionName,
+	};
+
+#ifdef BUILD_NRELEASE
+	std::println("checking physical device {}", device.getProperties2().properties.deviceName.data());
+#endif
+
+#ifdef BUILD_DEBUG
+	std::println("  checking api version");
+#endif
+	if (device.getProperties2().properties.apiVersion < vk::ApiVersion13)
+		return false;
+
+#ifdef BUILD_DEBUG
+	std::println("  checking queueFamilies");
+#endif
+	std::vector<vk::QueueFamilyProperties2> queueFamilies = device.getQueueFamilyProperties2();
+	if (std::none_of(queueFamilies.begin(), queueFamilies.end(),
+		[](const vk::QueueFamilyProperties2& queueFamily) {
+		return (queueFamily.queueFamilyProperties.queueFlags & vk::QueueFlagBits::eGraphics) == vk::QueueFlagBits::eGraphics;
+	}))
+		return false;
+
+#ifdef BUILD_DEBUG
+	std::println("  checking device extensions");
+#endif
+	std::expected<std::vector<vk::ExtensionProperties>, vk::Result> deviceExtensions = device.enumerateDeviceExtensionProperties();
+	if (!deviceExtensions)
+		return false;
+
+#ifdef BUILD_DEBUG
+	for (const vk::ExtensionProperties& deviceExtension : *deviceExtensions)
+		std::println("    {}", deviceExtension.extensionName.data());
+#endif
+
+	for (const char* requiredExtension : requiredExtensions) {
+		if (!std::any_of(deviceExtensions->begin(), deviceExtensions->end(),
+				[requiredExtension](const vk::ExtensionProperties& deviceExtension) {
+				return std::strcmp(deviceExtension.extensionName, requiredExtension) == 0;
+		}))
+			return false;
+	}
+
+	auto features = device.getFeatures2<
+		vk::PhysicalDeviceFeatures2,
+		vk::PhysicalDeviceVulkan11Features,
+		vk::PhysicalDeviceVulkan13Features,
+		vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT
+	>();
+
+	if (!features.get<vk::PhysicalDeviceVulkan11Features>().shaderDrawParameters)
+		return false;
+	if (!features.get<vk::PhysicalDeviceVulkan13Features>().dynamicRendering)
+		return false;
+	if (!features.get<vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT>().extendedDynamicState)
+		return false;
+
+	return true;
+}
+
+bool loadPhysicalDevice() {
+	std::expected<std::vector<vk::PhysicalDevice>, vk::Result> physicalDevices = instance.enumeratePhysicalDevices();
+	if (!physicalDevices || physicalDevices->empty()) {
+		std::println(std::cerr, "Failed to find GPU with Vulkan support");
+		return false;
+	}
+
+	for (const vk::PhysicalDevice& pd : *physicalDevices) {
+		if (physicalDevice && physicalDevice.getProperties2().properties.deviceType == vk::PhysicalDeviceType::eDiscreteGpu)
+			break;
+
+		// if a device has already been chosen,
+		// don't evaluate the other ones if it is not a dedicated gpu
+		if (physicalDevice)
+			continue;
+
+		if (!isDeviceSuitable(pd))
+			continue;
+
+		physicalDevice = pd;
+	}
+
+	if (!physicalDevice) {
+		std::println(std::cerr, "Could not find any suitable device");
+		return false;
+	}
+
+#ifdef BUILD_NRELEASE
+	std::println("Found physical device {} of type {}",
+		physicalDevice.getProperties2().properties.deviceName.data(),
+		vk::to_string(physicalDevice.getProperties2().properties.deviceType));
+#endif
+
 	return true;
 }
 
@@ -243,98 +341,11 @@ bool initVulkan() {
 			debugMessenger = *_debugMessenger;
 		else
 			std::println(std::cerr, "Got error {} whilst creating debug messenger, continuing without", vk::to_string(_debugMessenger.error()));
-#endif
+#endif // BUILD_NRELEASE
 	}
 
-	{
-		auto physicalDevices = instance.enumeratePhysicalDevices();
-		if (!physicalDevices || physicalDevices->empty()) {
-			std::println(std::cerr, "Failed to find GPU with Vulkan support");
-			goto cleanup_debugMessenger;
-		}
-
-		std::vector<const char*> requiredExtensions{
-			vk::KHRSwapchainExtensionName,
-		};
-
-		for (const vk::PhysicalDevice& pd : *physicalDevices) {
-			if (physicalDevice && physicalDevice.getProperties2().properties.deviceType == vk::PhysicalDeviceType::eDiscreteGpu)
-				break;
-
-			// if a device has already been chosen,
-			// don't evaluate the other ones if it is not a dedicated gpu
-			if (physicalDevice)
-				continue;
-
-#ifdef BUILD_NRELEASE
-			std::println("checking physical device {}", pd.getProperties2().properties.deviceName.data());
-#endif
-
-#ifdef BUILD_DEBUG
-			std::println("  checking api version");
-#endif
-			if (pd.getProperties2().properties.apiVersion < vk::ApiVersion13)
-				continue;
-
-#ifdef BUILD_DEBUG
-			std::println("  checking queueFamilies");
-#endif
-			std::vector<vk::QueueFamilyProperties2> queueFamilies = pd.getQueueFamilyProperties2();
-			if (std::none_of(queueFamilies.begin(), queueFamilies.end(),
-					[](const vk::QueueFamilyProperties2& queueFamily) {
-						return (queueFamily.queueFamilyProperties.queueFlags & vk::QueueFlagBits::eGraphics) == vk::QueueFlagBits::eGraphics;
-					}))
-				continue;
-
-#ifdef BUILD_DEBUG
-			std::println("  checking device extensions");
-#endif
-			auto deviceExtensions = pd.enumerateDeviceExtensionProperties();
-			if (!deviceExtensions)
-				continue;
-
-#ifdef BUILD_DEBUG
-			for (const auto& deviceExtension : *deviceExtensions)
-				std::println("    {}", deviceExtension.extensionName.data());
-#endif
-
-			if (!std::all_of(requiredExtensions.begin(), requiredExtensions.end(),
-					[deviceExtensions](const auto& requiredExtension) {
-						return std::any_of(deviceExtensions->begin(), deviceExtensions->end(),
-							[requiredExtension](const auto& deviceExtension) {
-								return std::strcmp(deviceExtension.extensionName, requiredExtension) == 0;
-							});
-					}))
-				continue;
-
-			auto features = pd.getFeatures2<
-				vk::PhysicalDeviceFeatures2,
-				vk::PhysicalDeviceVulkan11Features,
-				vk::PhysicalDeviceVulkan13Features,
-				vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT
-			>();
-
-			if (!features.get<vk::PhysicalDeviceVulkan11Features>().shaderDrawParameters)
-				continue;
-			if (!features.get<vk::PhysicalDeviceVulkan13Features>().dynamicRendering)
-				continue;
-			if (!features.get<vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT>().extendedDynamicState)
-				continue;
-
-			physicalDevice = pd;
-		}
-
-		if (!physicalDevice) {
-			std::println(std::cerr, "Could not find any suitable device");
-			goto cleanup_debugMessenger;
-		}
-
-#ifdef BUILD_NRELEASE
-			std::println("Found physical device {} of type {}",
-				physicalDevice.getProperties2().properties.deviceName.data(),
-				vk::to_string(physicalDevice.getProperties2().properties.deviceType));
-#endif
-	}
+	if (!loadPhysicalDevice())
+		goto cleanup_debugMessenger;
 
 	{
 		float queuePriority = 0.5f;
