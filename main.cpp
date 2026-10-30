@@ -207,6 +207,37 @@ static bool createVulkanInstance() {
 	return true;
 }
 
+void setupDebugMessenger() {
+#ifdef BUILD_NRELEASE
+	vk::DebugUtilsMessageSeverityFlagsEXT severityFlags(
+#ifdef BUILD_DEBUG
+		vk::DebugUtilsMessageSeverityFlagBitsEXT::eVerbose |
+		vk::DebugUtilsMessageSeverityFlagBitsEXT::eInfo |
+#endif
+		vk::DebugUtilsMessageSeverityFlagBitsEXT::eWarning |
+		vk::DebugUtilsMessageSeverityFlagBitsEXT::eError
+	);
+	vk::DebugUtilsMessageTypeFlagsEXT typeFlags(
+#ifdef BUILD_DEBUG
+		vk::DebugUtilsMessageTypeFlagBitsEXT::eGeneral |
+#endif
+		vk::DebugUtilsMessageTypeFlagBitsEXT::eValidation |
+		vk::DebugUtilsMessageTypeFlagBitsEXT::ePerformance
+	);
+	vk::DebugUtilsMessengerCreateInfoEXT debugMessengerCreateInfo{
+		.messageSeverity = severityFlags,
+		.messageType = typeFlags,
+		.pfnUserCallback = &debugCallback,
+	};
+
+	std::expected<vk::DebugUtilsMessengerEXT, vk::Result> _debugMessenger = instance.createDebugUtilsMessengerEXT(debugMessengerCreateInfo);
+	if (_debugMessenger)
+		debugMessenger = *_debugMessenger;
+	else
+		std::println(std::cerr, "Got error {} whilst creating debug messenger, continuing without", vk::to_string(_debugMessenger.error()));
+#endif // BUILD_NRELEASE
+}
+
 bool isDeviceSuitable(const vk::PhysicalDevice& device) {
 	const std::vector<const char*> requiredExtensions{
 		vk::KHRSwapchainExtensionName,
@@ -313,36 +344,7 @@ bool initVulkan() {
 
 	VULKAN_HPP_DEFAULT_DISPATCHER.init(instance);
 
-	{
-#ifdef BUILD_NRELEASE
-		vk::DebugUtilsMessageSeverityFlagsEXT severityFlags(
-#ifdef BUILD_DEBUG
-			vk::DebugUtilsMessageSeverityFlagBitsEXT::eVerbose |
-			vk::DebugUtilsMessageSeverityFlagBitsEXT::eInfo |
-#endif
-			vk::DebugUtilsMessageSeverityFlagBitsEXT::eWarning |
-			vk::DebugUtilsMessageSeverityFlagBitsEXT::eError
-		);
-		vk::DebugUtilsMessageTypeFlagsEXT typeFlags(
-#ifdef BUILD_DEBUG
-			vk::DebugUtilsMessageTypeFlagBitsEXT::eGeneral |
-#endif
-			vk::DebugUtilsMessageTypeFlagBitsEXT::eValidation |
-			vk::DebugUtilsMessageTypeFlagBitsEXT::ePerformance
-		);
-		vk::DebugUtilsMessengerCreateInfoEXT debugMessengerCreateInfo{
-			.messageSeverity = severityFlags,
-			.messageType = typeFlags,
-			.pfnUserCallback = &debugCallback,
-		};
-
-		std::expected<vk::DebugUtilsMessengerEXT, vk::Result> _debugMessenger = instance.createDebugUtilsMessengerEXT(debugMessengerCreateInfo);
-		if (_debugMessenger)
-			debugMessenger = *_debugMessenger;
-		else
-			std::println(std::cerr, "Got error {} whilst creating debug messenger, continuing without", vk::to_string(_debugMessenger.error()));
-#endif // BUILD_NRELEASE
-	}
+	setupDebugMessenger();
 
 	if (!loadPhysicalDevice())
 		goto cleanup_debugMessenger;
