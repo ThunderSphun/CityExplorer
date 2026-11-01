@@ -19,6 +19,7 @@ vk::Device logicalDevice;
 vk::Queue graphicsQueue;
 vk::SwapchainKHR swapchain;
 std::vector<vk::Image> images;
+std::vector<vk::ImageView> imageViews;
 
 VKAPI_ATTR vk::Bool32 VKAPI_CALL debugCallback(
 	vk::DebugUtilsMessageSeverityFlagBitsEXT severity,
@@ -531,6 +532,28 @@ bool createSwapChain() {
 	}
 	images = *_images;
 
+	imageViews.reserve(images.size());
+
+	vk::ImageViewCreateInfo imageViewCreateInfo{
+		.viewType = vk::ImageViewType::e2D,
+		.format = surfaceFormat.format,
+		.subresourceRange = { vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1 },
+	};
+
+	for (size_t i = 0; i < images.size(); i++) {
+		imageViewCreateInfo.setImage(images[i]);
+		std::expected<vk::ImageView, vk::Result> imageView = logicalDevice.createImageView(imageViewCreateInfo);
+		if (!imageView) {
+			std::println(std::cerr, "Got error {} whilst creating image view {}", vk::to_string(imageView.error()), i);
+			for (vk::ImageView& imageView : imageViews)
+				logicalDevice.destroyImageView(imageView);
+			images.clear();
+			images.shrink_to_fit();
+			return false;
+		}
+		imageViews.emplace_back(*imageView);
+	}
+
 	return true;
 }
 
@@ -562,7 +585,12 @@ bool initVulkan() {
 	return true;
 
 cleanup_swapChain:
+	for (vk::ImageView& imageView : imageViews)
+		logicalDevice.destroyImageView(imageView);
+	imageViews.clear();
+	imageViews.shrink_to_fit();
 	images.clear();
+	images.shrink_to_fit();
 	logicalDevice.destroySwapchainKHR(swapchain);
 	swapchain = nullptr;
 
@@ -600,7 +628,12 @@ void shutdownSDL() {
 }
 
 void shutdownVulkan() {
+	for (vk::ImageView& imageView : imageViews)
+		logicalDevice.destroyImageView(imageView);
+	imageViews.clear();
+	imageViews.shrink_to_fit();
 	images.clear();
+	images.shrink_to_fit();
 	logicalDevice.destroySwapchainKHR(swapchain);
 	swapchain = nullptr;
 
