@@ -1,15 +1,16 @@
-#include <SDL3/SDL.h>
-#include <vulkan/vulkan.hpp>
-#include <SDL3/SDL_vulkan.h>
-#include <glm/glm.hpp>
-
 #include <print>
 #include <format>
 #include <iostream>
 #include <expected>
 #include <algorithm>
 
-SDL_Window* window;
+#include <SDL3/SDL.h>
+#include <vulkan/vulkan.hpp>
+#include <SDL3/SDL_vulkan.h>
+#include <glm/glm.hpp>
+
+#include "window.h"
+
 vk::Instance instance;
 #ifdef BUILD_NRELEASE
 vk::DebugUtilsMessengerEXT debugMessenger;
@@ -34,74 +35,6 @@ VKAPI_ATTR vk::Bool32 VKAPI_CALL debugCallback(
 	return vk::False;
 }
 #endif
-
-bool initSDL() {
-#define setSDLMetaData(_name, _value) \
-if (!SDL_SetAppMetadataProperty(_name, _value)) { \
-	std::string errorMsg = std::format("Could not set metadata property {}. Error {}", #_name, SDL_GetError()); \
-	if (!SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_WARNING, "Metadata Error", errorMsg.c_str(), nullptr)) \
-		std::println(std::cerr, "{}", errorMsg); \
-}
-
-	setSDLMetaData(SDL_PROP_APP_METADATA_NAME_STRING, "CityExplorer");
-	setSDLMetaData(SDL_PROP_APP_METADATA_VERSION_STRING, "1.0.0");
-	setSDLMetaData(SDL_PROP_APP_METADATA_IDENTIFIER_STRING, "com.github.thundersphun.CityExplorer");
-	setSDLMetaData(SDL_PROP_APP_METADATA_CREATOR_STRING, "ThunderSphun");
-	setSDLMetaData(SDL_PROP_APP_METADATA_URL_STRING, "https://github.com/ThunderSphun/CityExplorer");
-	setSDLMetaData(SDL_PROP_APP_METADATA_TYPE_STRING, "game");
-
-#undef setSDLMetaData
-
-	if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
-		std::string errorMsg = std::format("Could not initialize SDL\n{}", SDL_GetError());
-		if (!SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Initialize error", errorMsg.c_str(), nullptr))
-			std::println(std::cerr, "{}", errorMsg);
-		return false;
-	}
-
-	float displayScale = SDL_GetDisplayContentScale(SDL_GetPrimaryDisplay());
-	if (displayScale == 0.0f) {
-#ifdef BUILD_DEBUG
-		std::string errorMsg = std::format("Could not query display content scale\n{}", SDL_GetError());
-		if (!SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_WARNING, "DisplayContentScale error", errorMsg.c_str(), nullptr))
-			std::println(std::cerr, "{}", errorMsg);
-#endif
-		displayScale = 1.0f;
-	}
-
-	window = SDL_CreateWindow("CityExplorer", 1280 * displayScale, 720 * displayScale, SDL_WINDOW_RESIZABLE | SDL_WINDOW_VULKAN | SDL_WINDOW_HIDDEN);
-	if (!window) {
-		std::string errorMsg = std::format("Could not create a window. Error {}", SDL_GetError());
-		if (!SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Initialize error", errorMsg.c_str(), nullptr))
-			std::println(std::cerr, "{}", errorMsg);
-
-		SDL_Quit();
-		return false;
-	}
-
-	{
-		const char* videoDriver = SDL_GetCurrentVideoDriver();
-		if (videoDriver && strcmp(videoDriver, "wayland") != 0 &&
-			!SDL_SetWindowPosition(window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED)) {
-	#ifdef BUILD_DEBUG
-			std::string errorMsg = std::format("Could not set window position\n{}", SDL_GetError());
-			if (!SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_WARNING, "Window reposition error", errorMsg.c_str(), nullptr))
-				std::println(std::cerr, "{}", errorMsg);
-	#endif
-		}
-	}
-	if (!SDL_ShowWindow(window)) {
-		std::string errorMsg = std::format("Could not show window\n{}", SDL_GetError());
-		if (!SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Window error", errorMsg.c_str(), nullptr))
-			std::println(std::cerr, "{}", errorMsg);
-		SDL_DestroyWindow(window);
-		window = nullptr;
-		SDL_Quit();
-		return false;
-	}
-
-	return true;
-}
 
 static bool createVulkanInstance() {
 	const vk::ApplicationInfo appInfo{
@@ -246,7 +179,7 @@ void setupDebugMessenger() {
 
 bool createSurface() {
 	VkSurfaceKHR _surface;
-	if (!SDL_Vulkan_CreateSurface(window, instance, nullptr, &_surface)) {
+	if (!SDL_Vulkan_CreateSurface(CityExplorer::g_window, instance, nullptr, &_surface)) {
 		std::println(std::cerr, "SDL could not create a vulkan surface {}", SDL_GetError());
 		return false;
 	}
@@ -427,7 +360,7 @@ bool createSwapChain() {
 	if (surfaceCapabilities->currentExtent.width == UINT32_MAX)
 		extend = surfaceCapabilities->currentExtent;
 	else {
-		bool gotSize = SDL_GetWindowSizeInPixels(window, (int*) &extend.width, (int*) &extend.height);
+		bool gotSize = SDL_GetWindowSizeInPixels(CityExplorer::g_window, (int*) &extend.width, (int*) &extend.height);
 
 		if (gotSize) {
 			extend.width = glm::clamp(extend.width, surfaceCapabilities->minImageExtent.width, surfaceCapabilities->maxImageExtent.width);
@@ -620,12 +553,6 @@ cleanup:
 	return false;
 }
 
-void shutdownSDL() {
-	SDL_DestroyWindow(window);
-	window = nullptr;
-
-	SDL_Quit();
-}
 
 void shutdownVulkan() {
 	for (vk::ImageView& imageView : imageViews)
@@ -656,7 +583,7 @@ void shutdownVulkan() {
 }
 
 bool init() {
-	if (!initSDL()) {
+	if (!CityExplorer::initSDL()) {
 		std::println(std::cerr, "Could not initialize SDL3");
 		goto cleanup;
 	}
@@ -672,7 +599,7 @@ cleanup_Vulkan:
 	shutdownVulkan();
 
 cleanup_SDL:
-	shutdownSDL();
+	CityExplorer::shutdownSDL();
 
 cleanup:
 	return false;
@@ -686,7 +613,7 @@ void run() {
 		while (SDL_PollEvent(&event)) {
 			if (event.type == SDL_EVENT_QUIT)
 				i = 120;
-			if (event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED && event.window.windowID == SDL_GetWindowID(window))
+			if (event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED && event.window.windowID == SDL_GetWindowID(CityExplorer::g_window))
 				i = 120;
 		}
 		// run for 120 frames on wayland
@@ -699,7 +626,7 @@ void run() {
 
 void shutdown() {
 	shutdownVulkan();
-	shutdownSDL();
+	CityExplorer::shutdownSDL();
 }
 
 int main(int argc, char* argv[]) {

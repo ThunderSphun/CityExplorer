@@ -57,7 +57,7 @@ target_include_directories(DearImGui PUBLIC vendor/DearImGui vendor/DearImGui/mi
 
 add_executable(${PROJECT_NAME} main.cpp)
 
-file(GLOB_RECURSE sources CONFIGURE_DEPENDS "source/**/*.cpp")
+file(GLOB_RECURSE sources CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/source/*.cpp")
 target_sources(${PROJECT_NAME} PRIVATE ${sources})
 
 target_include_directories(${PROJECT_NAME} PRIVATE include)
