@@ -54,11 +54,13 @@ static void shutdown() {
 }
 
 int main(int argc, char* argv[]) {
-	if (!init())
-		return -1;
+	for (int i = 0; i < 2; i++) {
+		if (!init())
+			return -1;
 
-	run();
-	shutdown();
+		run();
+		shutdown();
+	}
 
 	return 0;
 }

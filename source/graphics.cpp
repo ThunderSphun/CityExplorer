@@ -5,6 +5,7 @@
 #include <expected>
 #include <algorithm>
 
+#include <vector>
 #include <vulkan/vulkan.hpp>
 #include <SDL3/SDL_vulkan.h>
 #include <glm/glm.hpp>
@@ -12,6 +13,7 @@
 #include "window.h"
 
 vk::Instance g_instance;
+vk::DebugUtilsMessengerEXT g_debugMessenger;
 vk::SurfaceKHR g_surface;
 vk::PhysicalDevice g_physicalDevice;
 vk::Device g_logicalDevice;
@@ -19,7 +21,6 @@ vk::Queue g_graphicsQueue;
 vk::SwapchainKHR g_swapchain;
 std::vector<vk::Image> g_images;
 std::vector<vk::ImageView> g_imageViews;
-vk::DebugUtilsMessengerEXT g_debugMessenger;
 
 static bool createVulkanInstance();
 static void setupDebugMessenger();
@@ -34,6 +35,11 @@ static VKAPI_ATTR vk::Bool32 VKAPI_CALL debugCallback(
 	const vk::DebugUtilsMessengerCallbackDataEXT* callbackData,
 	void* userData);
 static bool isDeviceSuitable(const vk::PhysicalDevice& device);
+static vk::Extent2D getExtent(const vk::SurfaceCapabilitiesKHR& surfaceCapabilities);
+static uint32_t getImageCount(const vk::SurfaceCapabilitiesKHR& surfaceCapabilities);
+static vk::SurfaceFormatKHR getSurfaceFormat(const std::vector<vk::SurfaceFormatKHR>& surfaceFormats);
+static vk::PresentModeKHR getPresentMode(const std::vector<vk::PresentModeKHR>& presentModes);
+static bool createImages(const vk::SurfaceFormatKHR& surfaceFormat);
 
 bool CityExplorer::initVulkan() {
 	VULKAN_HPP_DEFAULT_DISPATCHER.init();
@@ -50,7 +56,6 @@ bool CityExplorer::initVulkan() {
 
 	if (!loadPhysicalDevice())
 		goto cleanup_surface;
-
 
 	if (!createLogicalDevice())
 		goto cleanup_physicalDevice;
@@ -389,60 +394,11 @@ static bool createSwapchain() {
 		return false;
 	}
 
-	vk::Extent2D extend;
-
-	if (surfaceCapabilities->currentExtent.width != UINT32_MAX)
-		extend = surfaceCapabilities->currentExtent;
-	else {
-		bool gotSize = SDL_GetWindowSizeInPixels(CityExplorer::g_window, (int*) &extend.width, (int*) &extend.height);
-
-		if (gotSize) {
-			extend.width = glm::clamp(extend.width, surfaceCapabilities->minImageExtent.width, surfaceCapabilities->maxImageExtent.width);
-			extend.height = glm::clamp(extend.height, surfaceCapabilities->minImageExtent.height, surfaceCapabilities->maxImageExtent.height);
-		} else {
-#ifdef BUILD_NRELEASE
-			std::println(std::cerr, "Could not get SDL frame size, got error {}, using minimal size", SDL_GetError());
-#endif
-			extend = surfaceCapabilities->minImageExtent;
-		}
-	}
-
-#ifdef BUILD_DEBUG
-	std::println("Using surface extend of {{{}, {}}}", extend.width, extend.height);
-#endif
-
-	uint32_t imageCount = 3;
-	if (imageCount < surfaceCapabilities->minImageCount)
-		imageCount = surfaceCapabilities->minImageCount;
-
-	if (surfaceCapabilities->maxImageCount != 0 && surfaceCapabilities->maxImageCount < imageCount)
-		imageCount = surfaceCapabilities->maxImageCount;
-
-#ifdef BUILD_DEBUG
-	std::println("Using {} images in swapChain", imageCount);
-#endif
-
 	std::expected<std::vector<vk::SurfaceFormatKHR>, vk::Result> surfaceFormats = g_physicalDevice.getSurfaceFormatsKHR(g_surface);
 	if (!surfaceFormats || surfaceFormats->empty()) {
 		std::println(std::cerr, "Could not load surface formats {}", vk::to_string(surfaceFormats.error()));
 		return false;
 	}
-
-	vk::SurfaceFormatKHR surfaceFormat = (*surfaceFormats)[0];
-	for (vk::SurfaceFormatKHR& format : *surfaceFormats) {
-		if (format.format != vk::Format::eR8G8B8A8Srgb)
-			continue;
-
-		if (format.colorSpace != vk::ColorSpaceKHR::eSrgbNonlinear)
-			continue;
-
-		surfaceFormat = format;
-		break;
-	}
-
-#ifdef BUILD_DEBUG
-	std::println("Chosen surface format {} and color space {}", vk::to_string(surfaceFormat.format), vk::to_string(surfaceFormat.colorSpace));
-#endif
 
 	std::expected<std::vector<vk::PresentModeKHR>, vk::Result> presentModes = g_physicalDevice.getSurfacePresentModesKHR(g_surface);
 	if (!presentModes) {
@@ -456,16 +412,17 @@ static bool createSwapchain() {
 		return false;
 	}
 
-	vk::PresentModeKHR presentMode = vk::PresentModeKHR::eFifo;
-	for (vk::PresentModeKHR& mode : *presentModes) {
-		if (mode != vk::PresentModeKHR::eMailbox)
-			continue;
+	vk::Extent2D extent = getExtent(*surfaceCapabilities);
+	uint32_t imageCount = getImageCount(*surfaceCapabilities);
+	vk::SurfaceFormatKHR surfaceFormat = getSurfaceFormat(*surfaceFormats);
+	vk::PresentModeKHR presentMode = getPresentMode(*presentModes);
 
-		presentMode = mode;
-		break;
-	}
 #ifdef BUILD_DEBUG
-	std::println("Chosen present mode {}", vk::to_string(presentMode));
+	std::println("Using surface extend of {{{}, {}}}", extent.width, extent.height);
+	std::println("Using {} images in swapChain", imageCount);
+	std::println("Using surface format {}", vk::to_string(surfaceFormat.format));
+	std::println("Using surface color space {}", vk::to_string(surfaceFormat.colorSpace));
+	std::println("Using present mode {}", vk::to_string(presentMode));
 #endif
 
 	vk::SwapchainCreateInfoKHR swapchainCreateInfo{
@@ -473,7 +430,7 @@ static bool createSwapchain() {
 		.minImageCount = imageCount,
 		.imageFormat = surfaceFormat.format,
 		.imageColorSpace = surfaceFormat.colorSpace,
-		.imageExtent = extend,
+		.imageExtent = extent,
 		.imageArrayLayers = 1,
 		.imageUsage = vk::ImageUsageFlagBits::eColorAttachment,
 		.imageSharingMode = vk::SharingMode::eExclusive,
@@ -490,41 +447,16 @@ static bool createSwapchain() {
 	}
 	g_swapchain = *_swapchain;
 
-	std::expected<std::vector<vk::Image>, vk::Result> _images = g_logicalDevice.getSwapchainImagesKHR(g_swapchain);
-	if (!_images) {
-		std::println(std::cerr, "Got error {} whilst getting the swapchain images", vk::to_string(_images.error()));
+	if (!createImages(surfaceFormat)) {
+		std::println(std::cerr, "Could not create images");
 		g_logicalDevice.destroySwapchainKHR(g_swapchain);
 		g_swapchain = nullptr;
 		return false;
-	}
-	g_images = *_images;
-
-	g_imageViews.reserve(g_images.size());
-
-	vk::ImageViewCreateInfo imageViewCreateInfo{
-		.viewType = vk::ImageViewType::e2D,
-		.format = surfaceFormat.format,
-		.subresourceRange = { vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1 },
-	};
-
-	for (size_t i = 0; i < g_images.size(); i++) {
-		imageViewCreateInfo.setImage(g_images[i]);
-		std::expected<vk::ImageView, vk::Result> imageView = g_logicalDevice.createImageView(imageViewCreateInfo);
-		if (!imageView) {
-			std::println(std::cerr, "Got error {} whilst creating image view {}", vk::to_string(imageView.error()), i);
-			for (vk::ImageView& imageView : g_imageViews)
-				g_logicalDevice.destroyImageView(imageView);
-			g_images.clear();
-			g_images.shrink_to_fit();
-			return false;
-		}
-		g_imageViews.emplace_back(*imageView);
 	}
 
 	return true;
 }
 
-#ifdef BUILD_NRELEASE
 static VKAPI_ATTR vk::Bool32 VKAPI_CALL debugCallback(
 	vk::DebugUtilsMessageSeverityFlagBitsEXT severity,
 	vk::DebugUtilsMessageTypeFlagsEXT type,
@@ -537,7 +469,6 @@ static VKAPI_ATTR vk::Bool32 VKAPI_CALL debugCallback(
 
 	return vk::False;
 }
-#endif
 
 static bool isDeviceSuitable(const vk::PhysicalDevice& device) {
 	const std::vector<const char*> requiredExtensions{
@@ -599,6 +530,107 @@ static bool isDeviceSuitable(const vk::PhysicalDevice& device) {
 		return false;
 
 	return true;
+}
+
+static vk::Extent2D getExtent(const vk::SurfaceCapabilitiesKHR& surfaceCapabilities) {
+	vk::Extent2D extent;
+
+	if (surfaceCapabilities.currentExtent.width != UINT32_MAX)
+		return surfaceCapabilities.currentExtent;
+
+	bool gotSize = SDL_GetWindowSizeInPixels(CityExplorer::g_window, (int*) &extent.width, (int*) &extent.height);
+
+	if (gotSize) {
+		extent.width = glm::clamp(extent.width, surfaceCapabilities.minImageExtent.width, surfaceCapabilities.maxImageExtent.width);
+		extent.height = glm::clamp(extent.height, surfaceCapabilities.minImageExtent.height, surfaceCapabilities.maxImageExtent.height);
+		return extent;
+	}
+
+#ifdef BUILD_NRELEASE
+	std::println(std::cerr, "Could not get SDL frame size, got error {}, using minimal size", SDL_GetError());
+#endif
+	return surfaceCapabilities.minImageExtent;
+}
+
+static uint32_t getImageCount(const vk::SurfaceCapabilitiesKHR& surfaceCapabilities) {
+	uint32_t imageCount = 3;
+	if (imageCount < surfaceCapabilities.minImageCount)
+		imageCount = surfaceCapabilities.minImageCount;
+
+	if (surfaceCapabilities.maxImageCount != 0 && surfaceCapabilities.maxImageCount < imageCount)
+		imageCount = surfaceCapabilities.maxImageCount;
+
+	return imageCount;
+}
+
+static vk::SurfaceFormatKHR getSurfaceFormat(const std::vector<vk::SurfaceFormatKHR>& surfaceFormats) {
+	for (const vk::SurfaceFormatKHR& format : surfaceFormats) {
+		if (format.format != vk::Format::eR8G8B8A8Srgb)
+			continue;
+
+		if (format.colorSpace != vk::ColorSpaceKHR::eSrgbNonlinear)
+			continue;
+
+		return format;
+	}
+	return surfaceFormats[0];
+}
+
+static vk::PresentModeKHR getPresentMode(const std::vector<vk::PresentModeKHR>& presentModes) {
+	for (const vk::PresentModeKHR& mode : presentModes) {
+		if (mode != vk::PresentModeKHR::eMailbox)
+			continue;
+
+		return mode;
+	}
+	return vk::PresentModeKHR::eFifo;
+}
+
+static bool createImages(const vk::SurfaceFormatKHR& surfaceFormat) {
+	vk::ImageViewCreateInfo imageViewCreateInfo{
+		.viewType = vk::ImageViewType::e2D,
+		.format = surfaceFormat.format,
+		.subresourceRange = {
+			.aspectMask = vk::ImageAspectFlagBits::eColor,
+			.baseMipLevel = 0,
+			.levelCount = 1,
+			.baseArrayLayer= 0,
+			.layerCount= 1,
+		},
+	};
+
+	std::expected<std::vector<vk::Image>, vk::Result> _images = g_logicalDevice.getSwapchainImagesKHR(g_swapchain);
+	if (!_images) {
+		std::println(std::cerr, "Got error {} whilst getting the swapchain images", vk::to_string(_images.error()));
+		goto cleanup;
+	}
+	g_images = *_images;
+
+	g_imageViews.reserve(g_images.size());
+	for (size_t i = 0; i < g_images.size(); i++) {
+		imageViewCreateInfo.setImage(g_images[i]);
+		std::expected<vk::ImageView, vk::Result> imageView = g_logicalDevice.createImageView(imageViewCreateInfo);
+		if (!imageView) {
+			std::println(std::cerr, "Got error {} whilst creating image view {}", vk::to_string(imageView.error()), i);
+			goto cleanup_imageViews;
+		}
+		g_imageViews.emplace_back(*imageView);
+	}
+
+	return true;
+
+cleanup_imageViews:
+	for (vk::ImageView& imageView : g_imageViews)
+		g_logicalDevice.destroyImageView(imageView);
+	g_imageViews.clear();
+	g_imageViews.shrink_to_fit();
+
+cleanup_images:
+	g_images.clear();
+	g_images.shrink_to_fit();
+
+cleanup:
+	return false;
 }
 
 VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE
