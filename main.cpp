@@ -32,6 +32,7 @@ cleanup:
 static void run() {
 	int i = 0;
 	const char* videoDriver = SDL_GetCurrentVideoDriver();
+	bool isWayland = videoDriver && strcmp(videoDriver, "wayland") == 0;
 	while(i < 120) {
 		SDL_Event event;
 		while (SDL_PollEvent(&event)) {
@@ -43,8 +44,7 @@ static void run() {
 		// run for 120 frames on wayland
 		// dirty fix to have the application be able to be closed easily
 		// wayland only shows a window when the first buffer is submitted
-		if (videoDriver && strcmp(videoDriver, "wayland") == 0)
-			i++;
+		i += isWayland;
 	}
 }
 
@@ -56,7 +56,7 @@ static void shutdown() {
 int main(int argc, char* argv[]) {
 	if (!init())
 		return -1;
-	
+
 	run();
 	shutdown();
 

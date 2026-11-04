@@ -391,7 +391,7 @@ static bool createSwapchain() {
 
 	vk::Extent2D extend;
 
-	if (surfaceCapabilities->currentExtent.width == UINT32_MAX)
+	if (surfaceCapabilities->currentExtent.width != UINT32_MAX)
 		extend = surfaceCapabilities->currentExtent;
 	else {
 		bool gotSize = SDL_GetWindowSizeInPixels(CityExplorer::g_window, (int*) &extend.width, (int*) &extend.height);

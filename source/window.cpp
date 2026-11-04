@@ -53,6 +53,10 @@ bool CityExplorer::initSDL() {
 		displayScale = 1.0f;
 	}
 
+#ifdef BUILD_DEBUG
+	std::println("Using display scale of {}", displayScale);
+#endif
+
 	g_window = SDL_CreateWindow("CityExplorer", 1280 * displayScale, 720 * displayScale, SDL_WINDOW_RESIZABLE | SDL_WINDOW_VULKAN | SDL_WINDOW_HIDDEN);
 	if (!g_window) {
 		std::string errorMsg = std::format("Could not create a window. Error {}", SDL_GetError());
