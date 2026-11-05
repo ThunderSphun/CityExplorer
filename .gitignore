@@ -1,3 +1,5 @@
 build/
 .vs/
 .vscode/
+
+assets/shaders/*.spv

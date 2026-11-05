@@ -83,4 +83,20 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE
 	$<$<NOT:$<CONFIG:Release>>:BUILD_NRELEASE>
 )
 
+find_program(SLANGC_EXECUTABLE slangc HINTS $ENV{VULKAN_SDK}/bin required)
+add_custom_command(
+	OUTPUT ${CMAKE_SOURCE_DIR}/assets/shaders/shader.spv
+	COMMAND ${SLANGC_EXECUTABLE} ${CMAKE_SOURCE_DIR}/assets/shaders/shader.slang
+		-target spirv
+		-profile spirv_1_4+spvRayQueryKHR
+		-emit-spirv-directly
+		-fvk-use-entrypoint-name -entry vertMain -entry fragMain
+		-o ${CMAKE_SOURCE_DIR}/assets/shaders/shader.spv
+	DEPENDS ${CMAKE_SOURCE_DIR}/assets/shaders/shader.slang
+	VERBATIM
+)
+add_custom_target(shaders DEPENDS ${CMAKE_SOURCE_DIR}/assets/shaders/shader.spv)
+
+add_dependencies(${PROJECT_NAME} shaders)
+
 set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT ${PROJECT_NAME})

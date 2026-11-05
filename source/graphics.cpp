@@ -28,6 +28,7 @@ static bool createSurface();
 static bool loadPhysicalDevice();
 static bool createLogicalDevice();
 static bool createSwapchain();
+static bool createGraphicsPipeline();
 
 static VKAPI_ATTR vk::Bool32 VKAPI_CALL debugCallback(
 	vk::DebugUtilsMessageSeverityFlagBitsEXT severity,
@@ -65,12 +66,17 @@ bool CityExplorer::initVulkan() {
 	if (!createSwapchain())
 		goto cleanup_logicalDevice;
 
+	if (!createGraphicsPipeline())
+		goto cleanup_swapchain;
+
 	return true;
 
-cleanup_swapChain:
+cleanup_graphicsPipeline:
+
+
+cleanup_swapchain:
 	for (vk::ImageView& imageView : g_imageViews)
 		g_logicalDevice.destroyImageView(imageView);
-
 	g_imageViews.clear();
 	g_imageViews.shrink_to_fit();
 
@@ -109,7 +115,6 @@ cleanup:
 void CityExplorer::shutdownVulkan() {
 	for (vk::ImageView& imageView : g_imageViews)
 		g_logicalDevice.destroyImageView(imageView);
-
 	g_imageViews.clear();
 	g_imageViews.shrink_to_fit();
 
@@ -454,6 +459,10 @@ static bool createSwapchain() {
 		return false;
 	}
 
+	return true;
+}
+
+static bool createGraphicsPipeline() {
 	return true;
 }
 
