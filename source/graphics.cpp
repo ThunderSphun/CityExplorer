@@ -163,7 +163,7 @@ static bool createVulkanInstance() {
 #endif
 
 	std::vector<const char*> extensions;
-#ifdef BUILD_NRELEASE
+#ifdef BUILD_NDIST
 	extensions.emplace_back(vk::EXTDebugUtilsExtensionName);
 #endif
 
@@ -202,7 +202,7 @@ static bool createVulkanInstance() {
 #endif
 
 	const char* layers[] = {
-#ifdef BUILD_NRELEASE
+#ifdef BUILD_NDIST
 		"VK_LAYER_KHRONOS_validation",
 #endif
 	};
@@ -253,7 +253,7 @@ static bool createVulkanInstance() {
 }
 
 static void setupDebugMessenger() {
-#ifdef BUILD_NRELEASE
+#ifdef BUILD_NDIST
 	vk::DebugUtilsMessageSeverityFlagsEXT severityFlags(
 #ifdef BUILD_DEBUG
 		vk::DebugUtilsMessageSeverityFlagBitsEXT::eVerbose |
@@ -280,7 +280,7 @@ static void setupDebugMessenger() {
 		g_debugMessenger = *_debugMessenger;
 	else
 		std::println(std::cerr, "Got error {} whilst creating debug messenger, continuing without", vk::to_string(_debugMessenger.error()));
-#endif // BUILD_NRELEASE
+#endif // BUILD_NDIST
 }
 
 static bool createSurface() {
@@ -321,7 +321,7 @@ static bool loadPhysicalDevice() {
 		return false;
 	}
 
-#ifdef BUILD_NRELEASE
+#ifdef BUILD_NDIST
 	std::println("Found physical device {} of type {}",
 		g_physicalDevice.getProperties2().properties.deviceName.data(),
 		vk::to_string(g_physicalDevice.getProperties2().properties.deviceType));
@@ -484,7 +484,7 @@ static bool isDeviceSuitable(const vk::PhysicalDevice& device) {
 		vk::KHRSwapchainExtensionName,
 	};
 
-#ifdef BUILD_NRELEASE
+#ifdef BUILD_NDIST
 	std::println("checking physical device {}", device.getProperties2().properties.deviceName.data());
 #endif
 
@@ -555,7 +555,7 @@ static vk::Extent2D getExtent(const vk::SurfaceCapabilitiesKHR& surfaceCapabilit
 		return extent;
 	}
 
-#ifdef BUILD_NRELEASE
+#ifdef BUILD_NDIST
 	std::println(std::cerr, "Could not get SDL frame size, got error {}, using minimal size", SDL_GetError());
 #endif
 	return surfaceCapabilities.minImageExtent;

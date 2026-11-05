@@ -11,28 +11,28 @@ find_package(Vulkan REQUIRED)
 find_package(SDL3 QUIET CONFIG COMPONENTS SDL3-static)
 if(NOT SDL3_FOUND)
 	set(SDL_TEST_LIBRARY OFF CACHE BOOL "" FORCE)
-	set(SDL_EXAMPLES OFF CACHE BOOL "" FORCE)
+	set(SDL_EXAMPLES     OFF CACHE BOOL "" FORCE)
 
 	set(SDL_SHARED OFF CACHE BOOL "" FORCE)
-	set(SDL_STATIC ON CACHE BOOL "" FORCE)
+	set(SDL_STATIC ON CACHE BOOL  "" FORCE)
 
 	FetchContent_Declare(
 		SDL3
-		GIT_REPOSITORY	https://github.com/libsdl-org/SDL.git
-		GIT_TAG			release-3.4.18
+		GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
+		GIT_TAG        release-3.4.18
 	)
 	list(APPEND fetchTargets SDL3)
 endif()
 
 find_package(glm QUIET CONFIG)
 if(NOT glm_FOUND)
-	set(GLM_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+	set(GLM_BUILD_TESTS   OFF CACHE BOOL "" FORCE)
 	set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 
 	FetchContent_Declare(
 		glm
-		GIT_REPOSITORY	https://github.com/g-truc/glm.git
-		GIT_TAG			1.0.3
+		GIT_REPOSITORY https://github.com/g-truc/glm.git
+		GIT_TAG        1.0.3
 	)
 	list(APPEND fetchTargets glm)
 endif()
@@ -75,14 +75,13 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE
 	VULKAN_HPP_USE_STD_EXPECTED
 
 	$<$<CONFIG:Debug>:BUILD_DEBUG>
-	$<$<CONFIG:RelWithDebInfo>:BUILD_DEBINFO>
-	$<$<CONFIG:Release>:BUILD_RELEASE>
+	$<$<CONFIG:RelWithDebInfo>:BUILD_RELEASE>
+	$<$<CONFIG:Release>:BUILD_DIST>
 
 	$<$<NOT:$<CONFIG:Debug>>:BUILD_NDEBUG>
-	$<$<NOT:$<CONFIG:RelWithDebInfo>>:BUILD_NDEBINFO>
-	$<$<NOT:$<CONFIG:Release>>:BUILD_NRELEASE>
+	$<$<NOT:$<CONFIG:RelWithDebInfo>>:BUILD_NRELEASE>
+	$<$<NOT:$<CONFIG:Release>>:BUILD_NDIST>
 )
-
 find_program(SLANGC_EXECUTABLE slangc HINTS $ENV{VULKAN_SDK}/bin required)
 add_custom_command(
 	OUTPUT ${CMAKE_SOURCE_DIR}/assets/shaders/shader.spv

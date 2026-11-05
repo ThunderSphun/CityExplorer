@@ -18,7 +18,7 @@ static void setSDLMetaData(const char* name, const char* defineName, const char*
 
 bool CityExplorer::initSDL() {
 	if (g_window) {
-#ifdef BUILD_NRELEASE
+#ifdef BUILD_NDIST
 		std::println("Tried to initialize SDL which was already initialized, did you forget to destroy first?");
 #endif
 		// return true as SDL was already successfully initialized
