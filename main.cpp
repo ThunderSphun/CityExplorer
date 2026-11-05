@@ -1,5 +1,7 @@
 #include <print>
 #include <iostream>
+#include <filesystem>
+#include <fstream>
 
 #include <SDL3/SDL.h>
 
@@ -54,6 +56,30 @@ static void shutdown() {
 }
 
 int main(int argc, char* argv[]) {
+	// temporary file loading / pwd check
+	{
+		std::ifstream file;
+
+		file.open(std::filesystem::path("assets") / "shaders" / "shader.spv", std::ios::ate | std::ios::binary);
+		if (file) {
+			std::vector<char> content(file.tellg());
+			file.seekg(0);
+			file.read(content.data(), static_cast<std::streamsize>(content.size()));
+			for (int i = 0; i < content.size(); i++) {
+				if (i != 0) {
+					if (i % 8 == 0)
+						std::print("    ");
+					if (i % 16 == 0)
+						std::print("\n");
+				}
+				std::print("{:02X} ", content[i]);
+			}
+			std::println();
+		} else
+			std::println("{}", std::filesystem::current_path().string());
+		file.close();
+	}
+
 	for (int i = 0; i < 2; i++) {
 		if (!init())
 			return -1;

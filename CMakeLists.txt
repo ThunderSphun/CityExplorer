@@ -98,4 +98,13 @@ add_custom_target(shaders DEPENDS ${CMAKE_SOURCE_DIR}/assets/shaders/shader.spv)
 
 add_dependencies(${PROJECT_NAME} shaders)
 
-set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT ${PROJECT_NAME})
+if(WIN32)
+	if(${CMAKE_GENERATOR} MATCHES "Visual Studio.*")
+		set_target_properties(
+			${PROJECT_NAME}
+			PROPERTIES
+				VS_DEBUGGER_WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+				VS_STARTUP_PROJECT ${PROJECT_NAME}
+		)
+	endif()
+endif()
