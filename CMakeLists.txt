@@ -82,6 +82,7 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE
 	$<$<NOT:$<CONFIG:RelWithDebInfo>>:BUILD_NRELEASE>
 	$<$<NOT:$<CONFIG:Release>>:BUILD_NDIST>
 )
+
 find_program(SLANGC_EXECUTABLE slangc HINTS $ENV{VULKAN_SDK}/bin required)
 add_custom_command(
 	OUTPUT ${CMAKE_SOURCE_DIR}/assets/shaders/shader.spv

@@ -4,6 +4,8 @@
 #include <iostream>
 #include <expected>
 #include <algorithm>
+#include <filesystem>
+#include <fstream>
 
 #include <vector>
 #include <vulkan/vulkan.hpp>
@@ -21,6 +23,7 @@ vk::Queue g_graphicsQueue;
 vk::SwapchainKHR g_swapchain;
 std::vector<vk::Image> g_images;
 std::vector<vk::ImageView> g_imageViews;
+vk::ShaderModule g_shaderModule;
 
 static bool createVulkanInstance();
 static void setupDebugMessenger();
@@ -41,8 +44,17 @@ static uint32_t getImageCount(const vk::SurfaceCapabilitiesKHR& surfaceCapabilit
 static vk::SurfaceFormatKHR getSurfaceFormat(const std::vector<vk::SurfaceFormatKHR>& surfaceFormats);
 static vk::PresentModeKHR getPresentMode(const std::vector<vk::PresentModeKHR>& presentModes);
 static bool createImages(const vk::SurfaceFormatKHR& surfaceFormat);
+static std::expected<vk::ShaderModule, vk::Result> createShaderModule(std::filesystem::path path);
 
 bool CityExplorer::initVulkan() {
+	if (g_instance) {
+#ifdef BUILD_NDIST
+		std::println("Tried to initialize Vulkan which was already initialized, did you forget to destroy first?");
+#endif
+		// return true as Vulkan was already successfully initialized
+		return true;
+	}
+
 	VULKAN_HPP_DEFAULT_DISPATCHER.init();
 
 	if (!createVulkanInstance())
@@ -72,7 +84,8 @@ bool CityExplorer::initVulkan() {
 	return true;
 
 cleanup_graphicsPipeline:
-
+	g_logicalDevice.destroyShaderModule(g_shaderModule);
+	g_logicalDevice = nullptr;
 
 cleanup_swapchain:
 	for (vk::ImageView& imageView : g_imageViews)
@@ -113,6 +126,9 @@ cleanup:
 }
 
 void CityExplorer::shutdownVulkan() {
+	g_logicalDevice.destroyShaderModule(g_shaderModule);
+	g_shaderModule = nullptr;
+
 	for (vk::ImageView& imageView : g_imageViews)
 		g_logicalDevice.destroyImageView(imageView);
 	g_imageViews.clear();
@@ -463,6 +479,18 @@ static bool createSwapchain() {
 }
 
 static bool createGraphicsPipeline() {
+	std::expected<vk::ShaderModule, vk::Result> _shaderModule = createShaderModule(std::filesystem::path("assets") / "shaders" / "shader.spv");
+	if (!_shaderModule) {
+		std::println(std::cerr, "Got error {} whilst creating shader module", vk::to_string(_shaderModule.error()));
+		return false;
+	}
+	g_shaderModule = *_shaderModule;
+
+	vk::PipelineShaderStageCreateInfo vertShaderStageInfo{ .stage = vk::ShaderStageFlagBits::eVertex, .module = g_shaderModule, .pName = "vertMain" };
+	vk::PipelineShaderStageCreateInfo fragShaderStageInfo{ .stage = vk::ShaderStageFlagBits::eFragment, .module = g_shaderModule, .pName = "fragMain" };
+
+	vk::PipelineShaderStageCreateInfo shaderStages[] = { vertShaderStageInfo, fragShaderStageInfo };
+
 	return true;
 }
 
@@ -640,6 +668,22 @@ cleanup_images:
 
 cleanup:
 	return false;
+}
+
+static std::expected<vk::ShaderModule, vk::Result> createShaderModule(std::filesystem::path path) {
+	std::vector<char> code;
+	{
+		std::ifstream file;
+
+		file.open(std::filesystem::path("assets") / "shaders" / "shader.spv", std::ios::ate | std::ios::binary);
+		if (file) {
+			code = std::vector<char>(file.tellg());
+			file.seekg(0).read(code.data(), static_cast<std::streamsize>(code.size()));
+		}
+		file.close();
+	}
+	vk::ShaderModuleCreateInfo createInfo{ .codeSize = code.size(), .pCode = reinterpret_cast<const uint32_t*>(code.data()) };
+	return g_logicalDevice.createShaderModule(createInfo);
 }
 
 VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE
