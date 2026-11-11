@@ -5,8 +5,8 @@
 
 #include <SDL3/SDL.h>
 
-#include "window.h"
-#include "graphics.h"
+#include "platform.h"
+#include "renderer.h"
 
 static bool init() {
 	if (!CityExplorer::initSDL()) {

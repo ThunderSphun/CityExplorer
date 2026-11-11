@@ -1,4 +1,4 @@
-#include "graphics.h"
+#include "renderer.h"
 
 #include <print>
 #include <iostream>
@@ -10,7 +10,7 @@
 #include <SDL3/SDL_vulkan.h>
 #include <glm/glm.hpp>
 
-#include "window.h"
+#include "platform.h"
 
 vk::Instance g_instance;
 vk::DebugUtilsMessengerEXT g_debugMessenger;
