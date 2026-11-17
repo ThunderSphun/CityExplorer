@@ -20,10 +20,12 @@ vk::SurfaceKHR g_surface;
 vk::PhysicalDevice g_physicalDevice;
 vk::Device g_logicalDevice;
 vk::Queue g_graphicsQueue;
+vk::Extent2D g_swapchainExtent;
 vk::SwapchainKHR g_swapchain;
 std::vector<vk::Image> g_images;
 std::vector<vk::ImageView> g_imageViews;
 vk::ShaderModule g_shaderModule;
+vk::PipelineLayout g_pipelineLayout;
 
 static bool createVulkanInstance();
 static void setupDebugMessenger();
@@ -433,13 +435,13 @@ static bool createSwapchain() {
 		return false;
 	}
 
-	vk::Extent2D extent = getExtent(*surfaceCapabilities);
+	g_swapchainExtent = getExtent(*surfaceCapabilities);
 	uint32_t imageCount = getImageCount(*surfaceCapabilities);
 	vk::SurfaceFormatKHR surfaceFormat = getSurfaceFormat(*surfaceFormats);
 	vk::PresentModeKHR presentMode = getPresentMode(*presentModes);
 
 #ifdef BUILD_DEBUG
-	std::println("Using surface extend of {{{}, {}}}", extent.width, extent.height);
+	std::println("Using surface extend of {{{}, {}}}", g_swapchainExtent.width, g_swapchainExtent.height);
 	std::println("Using {} images in swapChain", imageCount);
 	std::println("Using surface format {}", vk::to_string(surfaceFormat.format));
 	std::println("Using surface color space {}", vk::to_string(surfaceFormat.colorSpace));
@@ -451,7 +453,7 @@ static bool createSwapchain() {
 		.minImageCount = imageCount,
 		.imageFormat = surfaceFormat.format,
 		.imageColorSpace = surfaceFormat.colorSpace,
-		.imageExtent = extent,
+		.imageExtent = g_swapchainExtent,
 		.imageArrayLayers = 1,
 		.imageUsage = vk::ImageUsageFlagBits::eColorAttachment,
 		.imageSharingMode = vk::SharingMode::eExclusive,
@@ -486,10 +488,58 @@ static bool createGraphicsPipeline() {
 	}
 	g_shaderModule = *_shaderModule;
 
-	vk::PipelineShaderStageCreateInfo vertShaderStageInfo{ .stage = vk::ShaderStageFlagBits::eVertex, .module = g_shaderModule, .pName = "vertMain" };
-	vk::PipelineShaderStageCreateInfo fragShaderStageInfo{ .stage = vk::ShaderStageFlagBits::eFragment, .module = g_shaderModule, .pName = "fragMain" };
+	vk::PipelineShaderStageCreateInfo vertShaderStageInfo{ .stage = vk::ShaderStageFlagBits::eVertex, .module = g_shaderModule, .pName = "vertMain", };
+	vk::PipelineShaderStageCreateInfo fragShaderStageInfo{ .stage = vk::ShaderStageFlagBits::eFragment, .module = g_shaderModule, .pName = "fragMain", };
 
-	vk::PipelineShaderStageCreateInfo shaderStages[] = { vertShaderStageInfo, fragShaderStageInfo };
+	vk::PipelineShaderStageCreateInfo shaderStages[] = { vertShaderStageInfo, fragShaderStageInfo, };
+
+	vk::PipelineVertexInputStateCreateInfo vertexInputInfo = {};
+	vk::PipelineInputAssemblyStateCreateInfo inputAssembly{ .topology = vk::PrimitiveTopology::eTriangleList, };
+
+	std::vector<vk::DynamicState> dynamicStates = { vk::DynamicState::eViewport, vk::DynamicState::eScissor, };
+	vk::PipelineDynamicStateCreateInfo dynamicState{ .dynamicStateCount = static_cast<uint32_t>(dynamicStates.size()), .pDynamicStates = dynamicStates.data(), };
+	vk::Viewport viewport = { 0.0f, 0.0f, static_cast<float>(g_swapchainExtent.width), static_cast<float>(g_swapchainExtent.height), 0.0f, 1.0f, };
+	vk::Rect2D scissor = { { 0, 0 }, g_swapchainExtent };
+	vk::PipelineViewportStateCreateInfo viewportState = { .viewportCount = 1, .pViewports = &viewport, .scissorCount = 1, .pScissors = &scissor, };
+
+	vk::PipelineRasterizationStateCreateInfo rasterizer = {
+		.depthClampEnable = vk::False,
+		.rasterizerDiscardEnable = vk::False,
+		.polygonMode = vk::PolygonMode::eFill,
+		.cullMode = vk::CullModeFlagBits::eBack,
+		.frontFace = vk::FrontFace::eClockwise,
+		.depthBiasEnable = vk::False,
+		.lineWidth = 1.0f,
+	};
+
+	vk::PipelineMultisampleStateCreateInfo multisampling = { .rasterizationSamples = vk::SampleCountFlagBits::e1, .sampleShadingEnable = vk::False, };
+
+	vk::PipelineColorBlendAttachmentState colorBlendAttachment = {
+		.blendEnable = vk::True,
+		.srcColorBlendFactor = vk::BlendFactor::eSrcAlpha,
+		.dstColorBlendFactor = vk::BlendFactor::eOneMinusSrcAlpha,
+		.colorBlendOp = vk::BlendOp::eAdd,
+		.srcAlphaBlendFactor = vk::BlendFactor::eOne,
+		.dstAlphaBlendFactor = vk::BlendFactor::eZero,
+		.alphaBlendOp = vk::BlendOp::eAdd,
+		.colorWriteMask = vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG | vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA,
+	};
+	vk::PipelineColorBlendStateCreateInfo colorBlending = {
+		.logicOpEnable = vk::False,
+		.logicOp = vk::LogicOp::eCopy,
+		.attachmentCount = 1,
+		.pAttachments = &colorBlendAttachment,
+	};
+
+	vk::PipelineLayoutCreateInfo pipelineLayoutInfo{ .setLayoutCount = 0, .pushConstantRangeCount = 0, };
+
+	std::expected<vk::PipelineLayout, vk::Result> pipelineLayout = g_logicalDevice.createPipelineLayout(pipelineLayoutInfo);
+	if (pipelineLayout)
+		g_pipelineLayout = *pipelineLayout;
+	else {
+		std::println(std::cerr, "Gotten error {} during pipeline creation", vk::to_string(pipelineLayout.error()));
+		return false;
+	}
 
 	return true;
 }
