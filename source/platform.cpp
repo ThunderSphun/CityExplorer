@@ -78,15 +78,6 @@ bool CityExplorer::initSDL() {
 #endif
 		}
 	}
-	if (!SDL_ShowWindow(g_window)) {
-		std::string errorMsg = std::format("Could not show window\n{}", SDL_GetError());
-		if (!SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Window error", errorMsg.c_str(), nullptr))
-			std::println(std::cerr, "{}", errorMsg);
-		SDL_DestroyWindow(g_window);
-		g_window = nullptr;
-		SDL_Quit();
-		return false;
-	}
 
 	return true;
 }

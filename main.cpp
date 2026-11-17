@@ -6,6 +6,10 @@
 #include "platform.h"
 #include "renderer.h"
 
+static bool init();
+static void run();
+static void shutdown();
+
 static bool init() {
 	if (!CityExplorer::initSDL()) {
 		std::println(std::cerr, "Could not initialize SDL3");
@@ -15,6 +19,16 @@ static bool init() {
 	if (!CityExplorer::initVulkan()) {
 		std::println(std::cerr, "Could not initialize Vulkan");
 		goto cleanup_SDL;
+	}
+
+	// All systems are initialized, now show window to user
+	// If something goes wrong, shutdown every system
+	if (!SDL_ShowWindow(CityExplorer::g_window)) {
+		std::string errorMsg = std::format("Could not show window\n{}", SDL_GetError());
+		if (!SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Window error", errorMsg.c_str(), nullptr))
+			std::println(std::cerr, "{}", errorMsg);
+		shutdown();
+		return false;
 	}
 
 	return true;
