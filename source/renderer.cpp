@@ -86,6 +86,7 @@ bool CityExplorer::initVulkan() {
 	return true;
 
 cleanup_graphicsPipeline:
+	g_logicalDevice.destroyPipelineLayout(g_pipelineLayout);
 	g_logicalDevice.destroyShaderModule(g_shaderModule);
 	g_logicalDevice = nullptr;
 
@@ -128,6 +129,8 @@ cleanup:
 }
 
 void CityExplorer::shutdownVulkan() {
+	g_logicalDevice.destroyPipelineLayout(g_pipelineLayout);
+
 	g_logicalDevice.destroyShaderModule(g_shaderModule);
 	g_shaderModule = nullptr;
 
