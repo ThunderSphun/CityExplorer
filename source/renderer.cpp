@@ -21,11 +21,13 @@ vk::PhysicalDevice g_physicalDevice;
 vk::Device g_logicalDevice;
 vk::Queue g_graphicsQueue;
 vk::Extent2D g_swapchainExtent;
+vk::SurfaceFormatKHR g_surfaceFormat;
 vk::SwapchainKHR g_swapchain;
 std::vector<vk::Image> g_images;
 std::vector<vk::ImageView> g_imageViews;
 vk::ShaderModule g_shaderModule;
 vk::PipelineLayout g_pipelineLayout;
+vk::Pipeline g_graphicsPipeline;
 
 static bool createVulkanInstance();
 static void setupDebugMessenger();
@@ -45,7 +47,7 @@ static vk::Extent2D getExtent(const vk::SurfaceCapabilitiesKHR& surfaceCapabilit
 static uint32_t getImageCount(const vk::SurfaceCapabilitiesKHR& surfaceCapabilities);
 static vk::SurfaceFormatKHR getSurfaceFormat(const std::vector<vk::SurfaceFormatKHR>& surfaceFormats);
 static vk::PresentModeKHR getPresentMode(const std::vector<vk::PresentModeKHR>& presentModes);
-static bool createImages(const vk::SurfaceFormatKHR& surfaceFormat);
+static bool createImages();
 static std::expected<vk::ShaderModule, vk::Result> createShaderModule(std::filesystem::path path);
 
 bool CityExplorer::initVulkan() {
@@ -86,6 +88,7 @@ bool CityExplorer::initVulkan() {
 	return true;
 
 cleanup_graphicsPipeline:
+	g_logicalDevice.destroyPipeline(g_graphicsPipeline);
 	g_logicalDevice.destroyPipelineLayout(g_pipelineLayout);
 	g_logicalDevice.destroyShaderModule(g_shaderModule);
 	g_logicalDevice = nullptr;
@@ -129,8 +132,8 @@ cleanup:
 }
 
 void CityExplorer::shutdownVulkan() {
+	g_logicalDevice.destroyPipeline(g_graphicsPipeline);
 	g_logicalDevice.destroyPipelineLayout(g_pipelineLayout);
-
 	g_logicalDevice.destroyShaderModule(g_shaderModule);
 	g_shaderModule = nullptr;
 
@@ -440,22 +443,22 @@ static bool createSwapchain() {
 
 	g_swapchainExtent = getExtent(*surfaceCapabilities);
 	uint32_t imageCount = getImageCount(*surfaceCapabilities);
-	vk::SurfaceFormatKHR surfaceFormat = getSurfaceFormat(*surfaceFormats);
+	g_surfaceFormat = getSurfaceFormat(*surfaceFormats);
 	vk::PresentModeKHR presentMode = getPresentMode(*presentModes);
 
 #ifdef BUILD_DEBUG
 	std::println("Using surface extend of {{{}, {}}}", g_swapchainExtent.width, g_swapchainExtent.height);
 	std::println("Using {} images in swapChain", imageCount);
-	std::println("Using surface format {}", vk::to_string(surfaceFormat.format));
-	std::println("Using surface color space {}", vk::to_string(surfaceFormat.colorSpace));
+	std::println("Using surface format {}", vk::to_string(g_surfaceFormat.format));
+	std::println("Using surface color space {}", vk::to_string(g_surfaceFormat.colorSpace));
 	std::println("Using present mode {}", vk::to_string(presentMode));
 #endif
 
 	vk::SwapchainCreateInfoKHR swapchainCreateInfo{
 		.surface = g_surface,
 		.minImageCount = imageCount,
-		.imageFormat = surfaceFormat.format,
-		.imageColorSpace = surfaceFormat.colorSpace,
+		.imageFormat = g_surfaceFormat.format,
+		.imageColorSpace = g_surfaceFormat.colorSpace,
 		.imageExtent = g_swapchainExtent,
 		.imageArrayLayers = 1,
 		.imageUsage = vk::ImageUsageFlagBits::eColorAttachment,
@@ -473,7 +476,7 @@ static bool createSwapchain() {
 	}
 	g_swapchain = *_swapchain;
 
-	if (!createImages(surfaceFormat)) {
+	if (!createImages()) {
 		std::println(std::cerr, "Could not create images");
 		g_logicalDevice.destroySwapchainKHR(g_swapchain);
 		g_swapchain = nullptr;
@@ -543,6 +546,34 @@ static bool createGraphicsPipeline() {
 		std::println(std::cerr, "Gotten error {} during pipeline creation", vk::to_string(pipelineLayout.error()));
 		return false;
 	}
+
+	vk::StructureChain<vk::GraphicsPipelineCreateInfo, vk::PipelineRenderingCreateInfo> pipelineCreateInfoChain = {
+		{
+			.stageCount = 2,
+			.pStages = shaderStages,
+			.pVertexInputState = &vertexInputInfo,
+			.pInputAssemblyState = &inputAssembly,
+			.pViewportState = &viewportState,
+			.pRasterizationState = &rasterizer,
+			.pMultisampleState = &multisampling,
+			.pColorBlendState = &colorBlending,
+			.pDynamicState = &dynamicState,
+			.layout = g_pipelineLayout,
+			.renderPass = nullptr,
+		}, {
+			.colorAttachmentCount = 1,
+			.pColorAttachmentFormats = &g_surfaceFormat.format,
+		}
+	};
+
+	vk::ResultValue<vk::Pipeline> pipeline = g_logicalDevice.createGraphicsPipeline(nullptr, pipelineCreateInfoChain.get<vk::GraphicsPipelineCreateInfo>());
+	if (!pipeline.has_value()) {
+		std::println(std::cerr, "got error {} whilst creating graphics pipeline", vk::to_string(pipeline.result));
+		g_logicalDevice.destroyPipelineLayout(g_pipelineLayout);
+		g_pipelineLayout = nullptr;
+		return false;
+	}
+	g_graphicsPipeline = pipeline.value;
 
 	return true;
 }
@@ -676,10 +707,10 @@ static vk::PresentModeKHR getPresentMode(const std::vector<vk::PresentModeKHR>& 
 	return vk::PresentModeKHR::eFifo;
 }
 
-static bool createImages(const vk::SurfaceFormatKHR& surfaceFormat) {
+static bool createImages() {
 	vk::ImageViewCreateInfo imageViewCreateInfo{
 		.viewType = vk::ImageViewType::e2D,
-		.format = surfaceFormat.format,
+		.format = g_surfaceFormat.format,
 		.subresourceRange = {
 			.aspectMask = vk::ImageAspectFlagBits::eColor,
 			.baseMipLevel = 0,
