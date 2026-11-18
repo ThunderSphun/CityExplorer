@@ -1,5 +1,6 @@
 #include "renderer.h"
 
+#include <stdint.h>
 #include <print>
 #include <iostream>
 #include <expected>
@@ -18,6 +19,7 @@ static vk::Instance l_instance;
 static vk::DebugUtilsMessengerEXT l_debugMessenger;
 static vk::SurfaceKHR l_surface;
 static vk::PhysicalDevice l_physicalDevice;
+static uint32_t l_queueIndex = -1;
 static vk::Device l_logicalDevice;
 static vk::Queue l_graphicsQueue;
 static vk::Extent2D l_swapchainExtent;
@@ -28,6 +30,8 @@ static std::vector<vk::ImageView> l_imageViews;
 static vk::ShaderModule l_shaderModule;
 static vk::PipelineLayout l_pipelineLayout;
 static vk::Pipeline l_graphicsPipeline;
+static vk::CommandPool l_commandPool;
+static vk::CommandBuffer l_commandBuffer;
 
 static bool createVulkanInstance();
 static void setupDebugMessenger();
@@ -36,6 +40,7 @@ static bool loadPhysicalDevice();
 static bool createLogicalDevice();
 static bool createSwapchain();
 static bool createGraphicsPipeline();
+static bool createCommandPool();
 
 static VKAPI_ATTR vk::Bool32 VKAPI_CALL debugCallback(
 	vk::DebugUtilsMessageSeverityFlagBitsEXT severity,
@@ -85,17 +90,31 @@ bool CityExplorer::initVulkan() {
 	if (!createGraphicsPipeline())
 		goto cleanup_swapchain;
 
+	if (!createCommandPool())
+		goto cleanup_graphicsPipeline;
+
 	return true;
+
+cleanup_commandPool:
+	l_commandBuffer = nullptr;
+
+	l_logicalDevice.destroyCommandPool(l_commandPool);
+	l_commandPool = nullptr;
 
 cleanup_graphicsPipeline:
 	l_logicalDevice.destroyPipeline(l_graphicsPipeline);
+	l_graphicsPipeline = nullptr;
+
 	l_logicalDevice.destroyPipelineLayout(l_pipelineLayout);
+	l_pipelineLayout = nullptr;
+
 	l_logicalDevice.destroyShaderModule(l_shaderModule);
-	l_logicalDevice = nullptr;
+	l_shaderModule = nullptr;
 
 cleanup_swapchain:
 	for (vk::ImageView& imageView : l_imageViews)
 		l_logicalDevice.destroyImageView(imageView);
+
 	l_imageViews.clear();
 	l_imageViews.shrink_to_fit();
 
@@ -110,6 +129,8 @@ cleanup_logicalDevice:
 
 	l_logicalDevice.destroy();
 	l_logicalDevice = nullptr;
+
+	l_queueIndex = -1;
 
 cleanup_physicalDevice:
 	l_physicalDevice = nullptr;
@@ -132,13 +153,23 @@ cleanup:
 }
 
 void CityExplorer::shutdownVulkan() {
+	l_commandBuffer = nullptr;
+
+	l_logicalDevice.destroyCommandPool(l_commandPool);
+	l_commandPool = nullptr;
+
 	l_logicalDevice.destroyPipeline(l_graphicsPipeline);
+	l_graphicsPipeline = nullptr;
+
 	l_logicalDevice.destroyPipelineLayout(l_pipelineLayout);
+	l_pipelineLayout = nullptr;
+
 	l_logicalDevice.destroyShaderModule(l_shaderModule);
 	l_shaderModule = nullptr;
 
 	for (vk::ImageView& imageView : l_imageViews)
 		l_logicalDevice.destroyImageView(imageView);
+
 	l_imageViews.clear();
 	l_imageViews.shrink_to_fit();
 
@@ -152,6 +183,8 @@ void CityExplorer::shutdownVulkan() {
 
 	l_logicalDevice.destroy();
 	l_logicalDevice = nullptr;
+
+	l_queueIndex = -1;
 
 	l_physicalDevice = nullptr;
 
@@ -270,7 +303,7 @@ static bool createVulkanInstance() {
 	if (instance)
 		l_instance = *instance;
 	else {
-		std::println(std::cerr, "Could not create vulkan instance {}", vk::to_string(_instance.error()));
+		std::println(std::cerr, "Could not create vulkan instance {}", vk::to_string(instance.error()));
 		return false;
 	}
 	return true;
@@ -303,7 +336,7 @@ static void setupDebugMessenger() {
 	if (debugMessenger)
 		l_debugMessenger = *debugMessenger;
 	else
-		std::println(std::cerr, "Got error {} whilst creating debug messenger, continuing without", vk::to_string(_debugMessenger.error()));
+		std::println(std::cerr, "Got error {} whilst creating debug messenger, continuing without", vk::to_string(debugMessenger.error()));
 #endif // BUILD_NDIST
 }
 
@@ -356,11 +389,8 @@ static bool loadPhysicalDevice() {
 
 static bool createLogicalDevice() {
 	float queuePriority = 0.5f;
-	vk::DeviceQueueCreateInfo deviceQueueCreateInfo{
-		.queueCount = 1,
-		.pQueuePriorities = &queuePriority,
-	};
 	{
+		size_t queueIndex = -1;
 		std::vector<vk::QueueFamilyProperties2> queueFamilyProperties = l_physicalDevice.getQueueFamilyProperties2();
 		for (size_t i = 0; i < queueFamilyProperties.size(); i++) {
 			if ((queueFamilyProperties[i].queueFamilyProperties.queueFlags & vk::QueueFlagBits::eGraphics) != vk::QueueFlagBits::eGraphics)
@@ -369,15 +399,23 @@ static bool createLogicalDevice() {
 			if (!l_physicalDevice.getSurfaceSupportKHR(i, l_surface))
 				continue;
 
-			deviceQueueCreateInfo.setQueueFamilyIndex(i);
+			queueIndex = i;
 			break;
 		}
 
-		if (deviceQueueCreateInfo.queueFamilyIndex == -1) {
+		if (queueIndex == -1) {
 			std::println(std::cerr, "Could not find a queue which supports both graphics and presenting to the window");
 			return false;
 		}
+		l_queueIndex = static_cast<uint32_t>(queueIndex);
 	}
+
+
+	vk::DeviceQueueCreateInfo deviceQueueCreateInfo{
+		.queueFamilyIndex = l_queueIndex,
+		.queueCount = 1,
+		.pQueuePriorities = &queuePriority,
+	};
 
 	vk::StructureChain<
 		vk::PhysicalDeviceFeatures2,
@@ -407,11 +445,11 @@ static bool createLogicalDevice() {
 	if (logicalDevice)
 		l_logicalDevice = *logicalDevice;
 	else {
-		std::println(std::cerr, "Got error {} whilst creating a logical device", vk::to_string(_logicalDevice.error()));
+		std::println(std::cerr, "Got error {} whilst creating a logical device", vk::to_string(logicalDevice.error()));
 		return false;
 	}
 
-	l_graphicsQueue = l_logicalDevice.getQueue(deviceQueueCreateInfo.queueFamilyIndex, 0);
+	l_graphicsQueue = l_logicalDevice.getQueue(l_queueIndex, 0);
 
 	return true;
 }
@@ -471,7 +509,7 @@ static bool createSwapchain() {
 
 	std::expected<vk::SwapchainKHR, vk::Result> swapchain = l_logicalDevice.createSwapchainKHR(swapchainCreateInfo);
 	if (!swapchain) {
-		std::println(std::cerr, "Got error {} whilst creating the swapchain", vk::to_string(_swapchain.error()));
+		std::println(std::cerr, "Got error {} whilst creating the swapchain", vk::to_string(swapchain.error()));
 		return false;
 	}
 	l_swapchain = *swapchain;
@@ -537,7 +575,7 @@ static bool createGraphicsPipeline() {
 		.pAttachments = &colorBlendAttachment,
 	};
 
-	vk::PipelineLayoutCreateInfo pipelineLayoutInfo{ .setLayoutCount = 0, .pushConstantRangeCount = 0, };
+	vk::PipelineLayoutCreateInfo pipelineLayoutInfo = { .setLayoutCount = 0, .pushConstantRangeCount = 0, };
 
 	std::expected<vk::PipelineLayout, vk::Result> pipelineLayout = l_logicalDevice.createPipelineLayout(pipelineLayoutInfo);
 	if (pipelineLayout)
@@ -574,6 +612,35 @@ static bool createGraphicsPipeline() {
 		return false;
 	}
 	l_graphicsPipeline = pipeline.value;
+
+	return true;
+}
+
+static bool createCommandPool() {
+	vk::CommandPoolCreateInfo commandPoolInfo = {
+		.flags = vk::CommandPoolCreateFlagBits::eResetCommandBuffer,
+		.queueFamilyIndex = l_queueIndex,
+	};
+
+	std::expected<vk::CommandPool, vk::Result> commandPool = l_logicalDevice.createCommandPool(commandPoolInfo);
+	if (!commandPool) {
+		std::println(std::cerr, "got error {} during command pool creation", vk::to_string(commandPool.error()));
+		return false;
+	}
+	l_commandPool = *commandPool;
+
+	vk::CommandBufferAllocateInfo allocInfo = { .commandPool = l_commandPool, .level = vk::CommandBufferLevel::ePrimary, .commandBufferCount = 1 };
+	std::expected<std::vector<vk::CommandBuffer>, vk::Result> commandBuffers = l_logicalDevice.allocateCommandBuffers(allocInfo);
+	if (!commandBuffers) {
+		std::println(std::cerr, "got error {} whilst allocating command buffers", vk::to_string(commandBuffers.error()));
+		l_logicalDevice.destroyCommandPool(l_commandPool);
+		return false;
+	} else if (commandBuffers->empty()) {
+		std::println(std::cerr, "gotten an empty list from allocating command buffer, requested {}", allocInfo.commandBufferCount);
+		l_logicalDevice.destroyCommandPool(l_commandPool);
+		return false;
+	}
+	l_commandBuffer = (*commandBuffers)[0];
 
 	return true;
 }
@@ -722,7 +789,7 @@ static bool createImages() {
 
 	std::expected<std::vector<vk::Image>, vk::Result> images = l_logicalDevice.getSwapchainImagesKHR(l_swapchain);
 	if (!images) {
-		std::println(std::cerr, "Got error {} whilst getting the swapchain images", vk::to_string(_images.error()));
+		std::println(std::cerr, "Got error {} whilst getting the swapchain images", vk::to_string(images.error()));
 		goto cleanup;
 	}
 	l_images = *images;
