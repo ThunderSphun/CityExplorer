@@ -59,6 +59,8 @@ static void run() {
 		// dirty fix to have the application be able to be closed easily
 		// wayland only shows a window when the first buffer is submitted
 		i += isWayland;
+
+		CityExplorer::drawFrame();
 	}
 }
 

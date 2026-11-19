@@ -32,6 +32,9 @@ static vk::PipelineLayout l_pipelineLayout;
 static vk::Pipeline l_graphicsPipeline;
 static vk::CommandPool l_commandPool;
 static vk::CommandBuffer l_commandBuffer;
+static vk::Semaphore l_presentCompleteSemaphore;
+static vk::Semaphore l_renderFinishedSemaphore;
+static vk::Fence l_drawFence;
 
 static bool createVulkanInstance();
 static void setupDebugMessenger();
@@ -41,6 +44,9 @@ static bool createLogicalDevice();
 static bool createSwapchain();
 static bool createGraphicsPipeline();
 static bool createCommandPool();
+static bool createSyncObjects();
+
+static void recordCommandBuffer(uint32_t imageIndex);
 
 static VKAPI_ATTR vk::Bool32 VKAPI_CALL debugCallback(
 	vk::DebugUtilsMessageSeverityFlagBitsEXT severity,
@@ -54,6 +60,7 @@ static vk::SurfaceFormatKHR getSurfaceFormat(const std::vector<vk::SurfaceFormat
 static vk::PresentModeKHR getPresentMode(const std::vector<vk::PresentModeKHR>& presentModes);
 static bool createImages();
 static std::expected<vk::ShaderModule, vk::Result> createShaderModule(std::filesystem::path path);
+static void transitionImageLayout(uint32_t imageIndex, vk::ImageLayout prevLayout, vk::ImageLayout nextLayout, vk::AccessFlags2 srcAccessMask, vk::AccessFlags2 dstAccessMask, vk::PipelineStageFlags2 srcStageMask, vk::PipelineStageFlags2 dstStageMask);
 
 bool CityExplorer::initVulkan() {
 	if (l_instance) {
@@ -93,7 +100,20 @@ bool CityExplorer::initVulkan() {
 	if (!createCommandPool())
 		goto cleanup_graphicsPipeline;
 
+	if (!createSyncObjects())
+		goto cleanup_commandPool;
+
 	return true;
+
+cleanup_syncObjects:
+	l_logicalDevice.destroySemaphore(l_presentCompleteSemaphore);
+	l_presentCompleteSemaphore = nullptr;
+
+	l_logicalDevice.destroySemaphore(l_renderFinishedSemaphore);
+	l_renderFinishedSemaphore = nullptr;
+
+	l_logicalDevice.destroyFence(l_drawFence);
+	l_drawFence = nullptr;
 
 cleanup_commandPool:
 	l_commandBuffer = nullptr;
@@ -153,50 +173,132 @@ cleanup:
 }
 
 void CityExplorer::shutdownVulkan() {
-	l_commandBuffer = nullptr;
+	{
+		l_logicalDevice.destroySemaphore(l_presentCompleteSemaphore);
+		l_presentCompleteSemaphore = nullptr;
 
-	l_logicalDevice.destroyCommandPool(l_commandPool);
-	l_commandPool = nullptr;
+		l_logicalDevice.destroySemaphore(l_renderFinishedSemaphore);
+		l_renderFinishedSemaphore = nullptr;
 
-	l_logicalDevice.destroyPipeline(l_graphicsPipeline);
-	l_graphicsPipeline = nullptr;
+		l_logicalDevice.destroyFence(l_drawFence);
+		l_drawFence = nullptr;
+	}
 
-	l_logicalDevice.destroyPipelineLayout(l_pipelineLayout);
-	l_pipelineLayout = nullptr;
+	{
+		l_commandBuffer = nullptr;
 
-	l_logicalDevice.destroyShaderModule(l_shaderModule);
-	l_shaderModule = nullptr;
+		l_logicalDevice.destroyCommandPool(l_commandPool);
+		l_commandPool = nullptr;
+	}
 
-	for (vk::ImageView& imageView : l_imageViews)
-		l_logicalDevice.destroyImageView(imageView);
+	{
+		l_logicalDevice.destroyPipeline(l_graphicsPipeline);
+		l_graphicsPipeline = nullptr;
 
-	l_imageViews.clear();
-	l_imageViews.shrink_to_fit();
+		l_logicalDevice.destroyPipelineLayout(l_pipelineLayout);
+		l_pipelineLayout = nullptr;
 
-	l_images.clear();
-	l_images.shrink_to_fit();
+		l_logicalDevice.destroyShaderModule(l_shaderModule);
+		l_shaderModule = nullptr;
+	}
 
-	l_logicalDevice.destroySwapchainKHR(l_swapchain);
-	l_swapchain = nullptr;
+	{
+		for (vk::ImageView& imageView : l_imageViews)
+			l_logicalDevice.destroyImageView(imageView);
 
-	l_graphicsQueue = nullptr;
+		l_imageViews.clear();
+		l_imageViews.shrink_to_fit();
 
-	l_logicalDevice.destroy();
-	l_logicalDevice = nullptr;
+		l_images.clear();
+		l_images.shrink_to_fit();
 
-	l_queueIndex = -1;
+		l_logicalDevice.destroySwapchainKHR(l_swapchain);
+		l_swapchain = nullptr;
+	}
 
-	l_physicalDevice = nullptr;
+	{
+		l_graphicsQueue = nullptr;
 
-	SDL_Vulkan_DestroySurface(l_instance, l_surface, nullptr);
-	l_surface = nullptr;
+		l_logicalDevice.destroy();
+		l_logicalDevice = nullptr;
 
-	if (l_debugMessenger)
-		l_instance.destroyDebugUtilsMessengerEXT(l_debugMessenger);
-	l_debugMessenger = nullptr;
+		l_queueIndex = -1;
+	}
 
-	l_instance.destroy();
-	l_instance = nullptr;
+	{
+		l_physicalDevice = nullptr;
+	}
+
+	{
+		SDL_Vulkan_DestroySurface(l_instance, l_surface, nullptr);
+		l_surface = nullptr;
+	}
+
+	{
+		if (l_debugMessenger)
+			l_instance.destroyDebugUtilsMessengerEXT(l_debugMessenger);
+		l_debugMessenger = nullptr;
+	}
+
+	{
+		l_instance.destroy();
+		l_instance = nullptr;
+	}
+}
+
+void CityExplorer::drawFrame() {
+	vk::Result fenceResult = l_logicalDevice.waitForFences(1, &l_drawFence, vk::True, UINT64_MAX);
+	switch (fenceResult) {
+	case vk::Result::eSuccess:
+		break;
+	case vk::Result::eTimeout:
+#ifdef BUILD_DEBUG
+		std::println("waiting for frame caused timeout");
+#endif
+		break;
+	default:
+		std::println(std::cerr, "Got error {} whilst waiting for drawing fence", vk::to_string(fenceResult));
+		return;
+	}
+	std::expected<void, vk::Result> fenceResetResult = l_logicalDevice.resetFences(l_drawFence);
+	if (!fenceResetResult) {
+		std::println(std::cerr, "Got error {} whilst reseting drawing fence", vk::to_string(fenceResetResult.error()));
+		return;
+	}
+
+	vk::ResultValue<uint32_t> imageIndex = l_logicalDevice.acquireNextImageKHR(l_swapchain, UINT64_MAX, l_presentCompleteSemaphore);
+	if (!imageIndex.has_value()) {
+		std::println(std::cerr, "got error {} whilst acquiring next image", vk::to_string(imageIndex.result));
+		return;
+	}
+
+	recordCommandBuffer(imageIndex.value);
+
+	vk::PipelineStageFlags waitDestinationStageMask = vk::PipelineStageFlagBits::eColorAttachmentOutput;
+	const vk::SubmitInfo submitInfo = {
+		.waitSemaphoreCount = 1,
+		.pWaitSemaphores = &l_presentCompleteSemaphore,
+		.pWaitDstStageMask = &waitDestinationStageMask,
+		.commandBufferCount = 1,
+		.pCommandBuffers = &l_commandBuffer,
+		.signalSemaphoreCount = 1,
+		.pSignalSemaphores = &l_renderFinishedSemaphore,
+	};
+	std::expected<void, vk::Result> queueSubmitResult = l_graphicsQueue.submit(submitInfo, l_drawFence);
+	if (!queueSubmitResult) {
+		std::println(std::cerr, "Got error {} whilst submitting queue", vk::to_string(queueSubmitResult.error()));
+		return;
+	}
+
+	const vk::PresentInfoKHR presentInfo = {
+		.waitSemaphoreCount = 1,
+		.pWaitSemaphores = &l_renderFinishedSemaphore,
+		.swapchainCount = 1,
+		.pSwapchains = &l_swapchain,
+		.pImageIndices = &imageIndex.value,
+	};
+
+	vk::Result presentResult = l_graphicsQueue.presentKHR(presentInfo);
 }
 
 static bool createVulkanInstance() {
@@ -636,13 +738,118 @@ static bool createCommandPool() {
 		l_logicalDevice.destroyCommandPool(l_commandPool);
 		return false;
 	} else if (commandBuffers->empty()) {
-		std::println(std::cerr, "gotten an empty list from allocating command buffer, requested {}", allocInfo.commandBufferCount);
+		std::println(std::cerr, "gotten an empty list from allocating command buffer, requested {} buffers", allocInfo.commandBufferCount);
 		l_logicalDevice.destroyCommandPool(l_commandPool);
 		return false;
 	}
 	l_commandBuffer = (*commandBuffers)[0];
 
 	return true;
+}
+
+static bool createSyncObjects() {
+	{
+		std::expected<vk::Semaphore, vk::Result> presentCompleteSemaphore = l_logicalDevice.createSemaphore({});
+		if (!presentCompleteSemaphore) {
+			std::println(std::cerr, "got error {} whilst creating semaphore for presenting completion state", vk::to_string(presentCompleteSemaphore.error()));
+			goto cleanup;
+		}
+		l_presentCompleteSemaphore = *presentCompleteSemaphore;
+	}
+
+	{
+		std::expected<vk::Semaphore, vk::Result> renderFinishedSemaphore = l_logicalDevice.createSemaphore({});
+		if (!renderFinishedSemaphore) {
+			std::println(std::cerr, "got error {} whilst creating semaphore for rendering finished state", vk::to_string(renderFinishedSemaphore.error()));
+			goto cleanup_presentComplete;
+		}
+		l_renderFinishedSemaphore = *renderFinishedSemaphore;
+	}
+
+	{
+		std::expected<vk::Fence, vk::Result> drawFence = l_logicalDevice.createFence({ .flags = vk::FenceCreateFlagBits::eSignaled, });
+		if (!drawFence) {
+			std::println(std::cerr, "got error {} whilst creating drawing fence", vk::to_string(drawFence.error()));
+			goto cleanup_presentComplete;
+		}
+		l_drawFence = *drawFence;
+	}
+	
+	return true;
+
+cleanup_drawFence:
+	l_logicalDevice.destroyFence(l_drawFence);
+	l_drawFence = nullptr;
+
+cleanup_frameFinished:
+	l_logicalDevice.destroySemaphore(l_renderFinishedSemaphore);
+	l_renderFinishedSemaphore = nullptr;
+
+cleanup_presentComplete:
+	l_logicalDevice.destroySemaphore(l_presentCompleteSemaphore);
+	l_presentCompleteSemaphore = nullptr;
+
+cleanup:
+	return false;
+}
+
+static void recordCommandBuffer(uint32_t imageIndex) {
+	vk::CommandBufferBeginInfo beginInfo = {
+	};
+	std::expected<void, vk::Result> commandBufferBeginResult = l_commandBuffer.begin(beginInfo);
+	if (!commandBufferBeginResult)
+		std::println(std::cerr, "got error {} when starting to record command buffer", vk::to_string(commandBufferBeginResult.error()));
+
+	transitionImageLayout(
+		imageIndex,
+		vk::ImageLayout::eUndefined,
+		vk::ImageLayout::eColorAttachmentOptimal,
+		{},
+		vk::AccessFlagBits2::eColorAttachmentWrite,
+		vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+		vk::PipelineStageFlagBits2::eColorAttachmentOutput
+	);
+
+	vk::ClearValue clearColor = vk::ClearColorValue(0.0f, 0.0f, 0.0f, 1.0f);
+	vk::RenderingAttachmentInfo attachmentInfo = {
+		.imageView = l_imageViews[imageIndex],
+		.imageLayout = vk::ImageLayout::eColorAttachmentOptimal,
+		.loadOp = vk::AttachmentLoadOp::eClear,
+		.storeOp = vk::AttachmentStoreOp::eStore,
+		.clearValue = clearColor,
+	};
+
+	vk::RenderingInfo renderingInfo = {
+		.renderArea = {.offset = {0, 0}, .extent = l_swapchainExtent},
+		.layerCount = 1,
+		.colorAttachmentCount = 1,
+		.pColorAttachments = &attachmentInfo,
+	};
+
+	l_commandBuffer.beginRendering(renderingInfo);
+
+	l_commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, l_graphicsPipeline);
+
+	l_commandBuffer.setViewport(0, vk::Viewport(0.0f, 0.0f, static_cast<float>(l_swapchainExtent.width), static_cast<float>(l_swapchainExtent.height), 0.0f, 1.0f));
+	l_commandBuffer.setScissor(0, vk::Rect2D(vk::Offset2D(0, 0), l_swapchainExtent));
+
+	l_commandBuffer.draw(3, 1, 0, 0);
+
+	l_commandBuffer.endRendering();
+
+	transitionImageLayout(
+		imageIndex,
+		vk::ImageLayout::eColorAttachmentOptimal,
+		vk::ImageLayout::ePresentSrcKHR,
+		vk::AccessFlagBits2::eColorAttachmentWrite,
+		{},
+		vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+		vk::PipelineStageFlagBits2::eBottomOfPipe
+	);
+
+	std::expected<void, vk::Result> commandBufferEndResult = l_commandBuffer.end();
+	if (!commandBufferEndResult)
+		std::println(std::cerr, "got error {} when starting to record command buffer", vk::to_string(commandBufferEndResult.error()));
 }
 
 static VKAPI_ATTR vk::Bool32 VKAPI_CALL debugCallback(
@@ -835,6 +1042,33 @@ static std::expected<vk::ShaderModule, vk::Result> createShaderModule(std::files
 	}
 	vk::ShaderModuleCreateInfo createInfo{ .codeSize = code.size(), .pCode = reinterpret_cast<const uint32_t*>(code.data()) };
 	return l_logicalDevice.createShaderModule(createInfo);
+}
+
+static void transitionImageLayout(uint32_t imageIndex, vk::ImageLayout prevLayout, vk::ImageLayout nextLayout, vk::AccessFlags2 srcAccessMask, vk::AccessFlags2 dstAccessMask, vk::PipelineStageFlags2 srcStageMask, vk::PipelineStageFlags2 dstStageMask) {
+	vk::ImageMemoryBarrier2 barrier = {
+		.srcStageMask = srcStageMask,
+		.srcAccessMask = srcAccessMask,
+		.dstStageMask = dstStageMask,
+		.dstAccessMask = dstAccessMask,
+		.oldLayout = prevLayout,
+		.newLayout = nextLayout,
+		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+		.image = l_images[imageIndex],
+		.subresourceRange = {
+			.aspectMask = vk::ImageAspectFlagBits::eColor,
+			.baseMipLevel = 0,
+			.levelCount = 1,
+			.baseArrayLayer = 0,
+			.layerCount = 1,
+		},
+	};
+	vk::DependencyInfo dependency_info = {
+		.dependencyFlags = {},
+		.imageMemoryBarrierCount = 1,
+		.pImageMemoryBarriers = &barrier,
+	};
+	l_commandBuffer.pipelineBarrier2(dependency_info);
 }
 
 VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE
