@@ -9,11 +9,15 @@
 #include <fstream>
 
 #include <vector>
+#include <array>
 #include <vulkan/vulkan.hpp>
 #include <SDL3/SDL_vulkan.h>
 #include <glm/glm.hpp>
 
 #include "platform.h"
+
+static constexpr uint32_t MAX_FRAMES_IN_FLIGHT = 2;
+static uint32_t frameIndex = 0;
 
 static vk::Instance l_instance;
 static vk::DebugUtilsMessengerEXT l_debugMessenger;
@@ -31,10 +35,10 @@ static vk::ShaderModule l_shaderModule;
 static vk::PipelineLayout l_pipelineLayout;
 static vk::Pipeline l_graphicsPipeline;
 static vk::CommandPool l_commandPool;
-static vk::CommandBuffer l_commandBuffer;
-static vk::Semaphore l_presentCompleteSemaphore;
-static vk::Semaphore l_renderFinishedSemaphore;
-static vk::Fence l_drawFence;
+static std::array<vk::CommandBuffer, MAX_FRAMES_IN_FLIGHT> l_commandBuffers;
+static std::array<vk::Semaphore, MAX_FRAMES_IN_FLIGHT> l_presentCompleteSemaphores;
+static std::vector<vk::Semaphore> l_renderFinishedSemaphores;
+static std::array<vk::Fence, MAX_FRAMES_IN_FLIGHT> l_drawFences;
 
 static bool createVulkanInstance();
 static void setupDebugMessenger();
@@ -110,17 +114,26 @@ bool CityExplorer::initVulkan() {
 	return true;
 
 cleanup_syncObjects:
-	l_logicalDevice.destroySemaphore(l_presentCompleteSemaphore);
-	l_presentCompleteSemaphore = nullptr;
+	for (vk::Semaphore& presentCompleteSemaphore : l_presentCompleteSemaphores) {
+		l_logicalDevice.destroySemaphore(presentCompleteSemaphore);
+		presentCompleteSemaphore = nullptr;
+	}
 
-	l_logicalDevice.destroySemaphore(l_renderFinishedSemaphore);
-	l_renderFinishedSemaphore = nullptr;
+	for (vk::Semaphore& renderFinishedSemaphore : l_renderFinishedSemaphores) {
+		l_logicalDevice.destroySemaphore(renderFinishedSemaphore);
+		renderFinishedSemaphore = nullptr;
+	}
+	l_renderFinishedSemaphores.clear();
+	l_renderFinishedSemaphores.shrink_to_fit();
 
-	l_logicalDevice.destroyFence(l_drawFence);
-	l_drawFence = nullptr;
+	for (vk::Fence& drawFence : l_drawFences) {
+		l_logicalDevice.destroyFence(drawFence);
+		drawFence = nullptr;
+	}
 
 cleanup_commandPool:
-	l_commandBuffer = nullptr;
+	for (vk::CommandBuffer& commandBuffer : l_commandBuffers)
+		commandBuffer = nullptr;
 
 	l_logicalDevice.destroyCommandPool(l_commandPool);
 	l_commandPool = nullptr;
@@ -182,18 +195,27 @@ void CityExplorer::shutdownVulkan() {
 		std::println(std::cerr, "Got error {} whilst waiting for logical device idle", vk::to_string(waitIdleResult.error()));
 
 	{
-		l_logicalDevice.destroySemaphore(l_presentCompleteSemaphore);
-		l_presentCompleteSemaphore = nullptr;
+		for (vk::Semaphore& presentCompleteSemaphore : l_presentCompleteSemaphores) {
+			l_logicalDevice.destroySemaphore(presentCompleteSemaphore);
+			presentCompleteSemaphore = nullptr;
+		}
 
-		l_logicalDevice.destroySemaphore(l_renderFinishedSemaphore);
-		l_renderFinishedSemaphore = nullptr;
+		for (vk::Semaphore& renderFinishedSemaphore : l_renderFinishedSemaphores) {
+			l_logicalDevice.destroySemaphore(renderFinishedSemaphore);
+			renderFinishedSemaphore = nullptr;
+		}
+		l_renderFinishedSemaphores.clear();
+		l_renderFinishedSemaphores.shrink_to_fit();
 
-		l_logicalDevice.destroyFence(l_drawFence);
-		l_drawFence = nullptr;
+		for (vk::Fence& drawFence : l_drawFences) {
+			l_logicalDevice.destroyFence(drawFence);
+			drawFence = nullptr;
+		}
 	}
 
 	{
-		l_commandBuffer = nullptr;
+		for (vk::CommandBuffer& commandBuffer : l_commandBuffers)
+			commandBuffer = nullptr;
 
 		l_logicalDevice.destroyCommandPool(l_commandPool);
 		l_commandPool = nullptr;
@@ -255,7 +277,7 @@ void CityExplorer::shutdownVulkan() {
 }
 
 void CityExplorer::drawFrame() {
-	vk::Result fenceResult = l_logicalDevice.waitForFences(1, &l_drawFence, vk::True, UINT64_MAX);
+	vk::Result fenceResult = l_logicalDevice.waitForFences(1, &l_drawFences[frameIndex], vk::True, UINT64_MAX);
 	switch (fenceResult) {
 	case vk::Result::eSuccess:
 		break;
@@ -268,36 +290,34 @@ void CityExplorer::drawFrame() {
 		std::println(std::cerr, "Got error {} whilst waiting for drawing fence", vk::to_string(fenceResult));
 		return;
 	}
-	std::expected<void, vk::Result> fenceResetResult = l_logicalDevice.resetFences(l_drawFence);
+	std::expected<void, vk::Result> fenceResetResult = l_logicalDevice.resetFences(l_drawFences[frameIndex]);
 	if (!fenceResetResult) {
 		std::println(std::cerr, "Got error {} whilst reseting drawing fence", vk::to_string(fenceResetResult.error()));
 		return;
 	}
 
-	vk::ResultValue<uint32_t> imageIndex = l_logicalDevice.acquireNextImageKHR(l_swapchain, UINT64_MAX, l_presentCompleteSemaphore);
+	vk::ResultValue<uint32_t> imageIndex = l_logicalDevice.acquireNextImageKHR(l_swapchain, UINT64_MAX, l_presentCompleteSemaphores[frameIndex]);
 	if (!imageIndex.has_value()) {
 		std::println(std::cerr, "got error {} whilst acquiring next image", vk::to_string(imageIndex.result));
 		return;
 	}
 
+	std::expected<void, vk::Result> resetResult = l_commandBuffers[frameIndex].reset();
+	if (!resetResult)
+		std::println(std::cerr, "Got error {} whilst resetting command buffer {}", vk::to_string(resetResult.error()), frameIndex);
 	recordCommandBuffer(imageIndex.value);
-
-	std::expected<void, vk::Result> waitIdleResult = l_graphicsQueue.waitIdle();
-	if (!waitIdleResult) {
-		std::println(std::cerr, "got error {} whilst waiting for queue idle", vk::to_string(waitIdleResult.error()));
-	}
 
 	vk::PipelineStageFlags waitDestinationStageMask = vk::PipelineStageFlagBits::eColorAttachmentOutput;
 	const vk::SubmitInfo submitInfo = {
 		.waitSemaphoreCount = 1,
-		.pWaitSemaphores = &l_presentCompleteSemaphore,
+		.pWaitSemaphores = &l_presentCompleteSemaphores[frameIndex],
 		.pWaitDstStageMask = &waitDestinationStageMask,
 		.commandBufferCount = 1,
-		.pCommandBuffers = &l_commandBuffer,
+		.pCommandBuffers = &l_commandBuffers[frameIndex],
 		.signalSemaphoreCount = 1,
-		.pSignalSemaphores = &l_renderFinishedSemaphore,
+		.pSignalSemaphores = &l_renderFinishedSemaphores[imageIndex.value],
 	};
-	std::expected<void, vk::Result> queueSubmitResult = l_graphicsQueue.submit(submitInfo, l_drawFence);
+	std::expected<void, vk::Result> queueSubmitResult = l_graphicsQueue.submit(submitInfo, l_drawFences[frameIndex]);
 	if (!queueSubmitResult) {
 		std::println(std::cerr, "Got error {} whilst submitting queue", vk::to_string(queueSubmitResult.error()));
 		return;
@@ -305,13 +325,16 @@ void CityExplorer::drawFrame() {
 
 	const vk::PresentInfoKHR presentInfo = {
 		.waitSemaphoreCount = 1,
-		.pWaitSemaphores = &l_renderFinishedSemaphore,
+		.pWaitSemaphores = &l_renderFinishedSemaphores[imageIndex.value],
 		.swapchainCount = 1,
 		.pSwapchains = &l_swapchain,
 		.pImageIndices = &imageIndex.value,
 	};
 
 	vk::Result presentResult = l_graphicsQueue.presentKHR(presentInfo);
+
+	frameIndex++;
+	frameIndex %= MAX_FRAMES_IN_FLIGHT;
 }
 
 static bool createVulkanInstance() {
@@ -744,72 +767,85 @@ static bool createCommandPool() {
 	}
 	l_commandPool = *commandPool;
 
-	vk::CommandBufferAllocateInfo allocInfo = { .commandPool = l_commandPool, .level = vk::CommandBufferLevel::ePrimary, .commandBufferCount = 1 };
+	vk::CommandBufferAllocateInfo allocInfo = { .commandPool = l_commandPool, .level = vk::CommandBufferLevel::ePrimary, .commandBufferCount = MAX_FRAMES_IN_FLIGHT };
 	std::expected<std::vector<vk::CommandBuffer>, vk::Result> commandBuffers = l_logicalDevice.allocateCommandBuffers(allocInfo);
 	if (!commandBuffers) {
 		std::println(std::cerr, "got error {} whilst allocating command buffers", vk::to_string(commandBuffers.error()));
 		l_logicalDevice.destroyCommandPool(l_commandPool);
 		return false;
 	} else if (commandBuffers->empty()) {
-		std::println(std::cerr, "gotten an empty list from allocating command buffer, requested {} buffers", allocInfo.commandBufferCount);
+		std::println(std::cerr, "gotten an empty list from allocating command buffers, requested {} buffers", allocInfo.commandBufferCount);
+		l_logicalDevice.destroyCommandPool(l_commandPool);
+		return false;
+	} else if (commandBuffers->size() < MAX_FRAMES_IN_FLIGHT) {
+		std::println(std::cerr, "gotten less command buffers than requested, requested {} buffers, got {}", allocInfo.commandBufferCount, commandBuffers->size());
 		l_logicalDevice.destroyCommandPool(l_commandPool);
 		return false;
 	}
-	l_commandBuffer = (*commandBuffers)[0];
+	std::copy_n(commandBuffers->begin(), l_commandBuffers.size(), l_commandBuffers.begin());
 
 	return true;
 }
 
 static bool createSyncObjects() {
-	{
+	for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
 		std::expected<vk::Semaphore, vk::Result> presentCompleteSemaphore = l_logicalDevice.createSemaphore({});
 		if (!presentCompleteSemaphore) {
 			std::println(std::cerr, "got error {} whilst creating semaphore for presenting completion state", vk::to_string(presentCompleteSemaphore.error()));
 			goto cleanup;
 		}
-		l_presentCompleteSemaphore = *presentCompleteSemaphore;
+		l_presentCompleteSemaphores[i] = *presentCompleteSemaphore;
 	}
 
-	{
+	l_renderFinishedSemaphores.reserve(l_images.size());
+	for (size_t i = 0; i < l_images.size(); i++) {
 		std::expected<vk::Semaphore, vk::Result> renderFinishedSemaphore = l_logicalDevice.createSemaphore({});
 		if (!renderFinishedSemaphore) {
 			std::println(std::cerr, "got error {} whilst creating semaphore for rendering finished state", vk::to_string(renderFinishedSemaphore.error()));
 			goto cleanup_presentComplete;
 		}
-		l_renderFinishedSemaphore = *renderFinishedSemaphore;
+		l_renderFinishedSemaphores.emplace_back(*renderFinishedSemaphore);
 	}
 
-	{
+	for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
 		std::expected<vk::Fence, vk::Result> drawFence = l_logicalDevice.createFence({ .flags = vk::FenceCreateFlagBits::eSignaled, });
 		if (!drawFence) {
 			std::println(std::cerr, "got error {} whilst creating drawing fence", vk::to_string(drawFence.error()));
 			goto cleanup_presentComplete;
 		}
-		l_drawFence = *drawFence;
+		l_drawFences[i] = *drawFence;
 	}
 	
 	return true;
 
 cleanup_drawFence:
-	l_logicalDevice.destroyFence(l_drawFence);
-	l_drawFence = nullptr;
+	for (vk::Fence& drawFence : l_drawFences) {
+		l_logicalDevice.destroyFence(drawFence);
+		drawFence = nullptr;
+	}
 
 cleanup_frameFinished:
-	l_logicalDevice.destroySemaphore(l_renderFinishedSemaphore);
-	l_renderFinishedSemaphore = nullptr;
+	for (vk::Semaphore& renderFinishedSemaphore : l_renderFinishedSemaphores) {
+		l_logicalDevice.destroySemaphore(renderFinishedSemaphore);
+		renderFinishedSemaphore = nullptr;
+	}
 
 cleanup_presentComplete:
-	l_logicalDevice.destroySemaphore(l_presentCompleteSemaphore);
-	l_presentCompleteSemaphore = nullptr;
+	for (vk::Semaphore& presentCompleteSemaphore : l_presentCompleteSemaphores) {
+		l_logicalDevice.destroySemaphore(presentCompleteSemaphore);
+		presentCompleteSemaphore = nullptr;
+	}
 
 cleanup:
 	return false;
 }
 
 static void recordCommandBuffer(uint32_t imageIndex) {
+	vk::CommandBuffer& commandBuffer = l_commandBuffers[frameIndex];
+
 	vk::CommandBufferBeginInfo beginInfo = {
 	};
-	std::expected<void, vk::Result> commandBufferBeginResult = l_commandBuffer.begin(beginInfo);
+	std::expected<void, vk::Result> commandBufferBeginResult = commandBuffer.begin(beginInfo);
 	if (!commandBufferBeginResult)
 		std::println(std::cerr, "got error {} when starting to record command buffer", vk::to_string(commandBufferBeginResult.error()));
 
@@ -839,16 +875,16 @@ static void recordCommandBuffer(uint32_t imageIndex) {
 		.pColorAttachments = &attachmentInfo,
 	};
 
-	l_commandBuffer.beginRendering(renderingInfo);
+	commandBuffer.beginRendering(renderingInfo);
 
-	l_commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, l_graphicsPipeline);
+	commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, l_graphicsPipeline);
 
-	l_commandBuffer.setViewport(0, vk::Viewport(0.0f, 0.0f, static_cast<float>(l_swapchainExtent.width), static_cast<float>(l_swapchainExtent.height), 0.0f, 1.0f));
-	l_commandBuffer.setScissor(0, vk::Rect2D(vk::Offset2D(0, 0), l_swapchainExtent));
+	commandBuffer.setViewport(0, vk::Viewport(0.0f, 0.0f, static_cast<float>(l_swapchainExtent.width), static_cast<float>(l_swapchainExtent.height), 0.0f, 1.0f));
+	commandBuffer.setScissor(0, vk::Rect2D(vk::Offset2D(0, 0), l_swapchainExtent));
 
-	l_commandBuffer.draw(3, 1, 0, 0);
+	commandBuffer.draw(3, 1, 0, 0);
 
-	l_commandBuffer.endRendering();
+	commandBuffer.endRendering();
 
 	transitionImageLayout(
 		imageIndex,
@@ -860,7 +896,7 @@ static void recordCommandBuffer(uint32_t imageIndex) {
 		vk::PipelineStageFlagBits2::eBottomOfPipe
 	);
 
-	std::expected<void, vk::Result> commandBufferEndResult = l_commandBuffer.end();
+	std::expected<void, vk::Result> commandBufferEndResult = commandBuffer.end();
 	if (!commandBufferEndResult)
 		std::println(std::cerr, "got error {} when starting to record command buffer", vk::to_string(commandBufferEndResult.error()));
 }
@@ -1089,7 +1125,7 @@ static void transitionImageLayout(
 		.imageMemoryBarrierCount = 1,
 		.pImageMemoryBarriers = &barrier,
 	};
-	l_commandBuffer.pipelineBarrier2(dependency_info);
+	l_commandBuffers[frameIndex].pipelineBarrier2(dependency_info);
 }
 
 VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE
