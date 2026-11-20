@@ -60,7 +60,11 @@ static vk::SurfaceFormatKHR getSurfaceFormat(const std::vector<vk::SurfaceFormat
 static vk::PresentModeKHR getPresentMode(const std::vector<vk::PresentModeKHR>& presentModes);
 static bool createImages();
 static std::expected<vk::ShaderModule, vk::Result> createShaderModule(std::filesystem::path path);
-static void transitionImageLayout(uint32_t imageIndex, vk::ImageLayout prevLayout, vk::ImageLayout nextLayout, vk::AccessFlags2 srcAccessMask, vk::AccessFlags2 dstAccessMask, vk::PipelineStageFlags2 srcStageMask, vk::PipelineStageFlags2 dstStageMask);
+static void transitionImageLayout(
+	uint32_t imageIndex,
+	vk::ImageLayout prevLayout, vk::ImageLayout nextLayout,
+	vk::AccessFlags2 srcAccessMask, vk::AccessFlags2 dstAccessMask,
+	vk::PipelineStageFlags2 srcStageMask, vk::PipelineStageFlags2 dstStageMask);
 
 bool CityExplorer::initVulkan() {
 	if (l_instance) {
@@ -173,6 +177,10 @@ cleanup:
 }
 
 void CityExplorer::shutdownVulkan() {
+	std::expected<void, vk::Result> waitIdleResult = l_logicalDevice.waitIdle();
+	if (!waitIdleResult)
+		std::println(std::cerr, "Got error {} whilst waiting for logical device idle", vk::to_string(waitIdleResult.error()));
+
 	{
 		l_logicalDevice.destroySemaphore(l_presentCompleteSemaphore);
 		l_presentCompleteSemaphore = nullptr;
@@ -273,6 +281,11 @@ void CityExplorer::drawFrame() {
 	}
 
 	recordCommandBuffer(imageIndex.value);
+
+	std::expected<void, vk::Result> waitIdleResult = l_graphicsQueue.waitIdle();
+	if (!waitIdleResult) {
+		std::println(std::cerr, "got error {} whilst waiting for queue idle", vk::to_string(waitIdleResult.error()));
+	}
 
 	vk::PipelineStageFlags waitDestinationStageMask = vk::PipelineStageFlagBits::eColorAttachmentOutput;
 	const vk::SubmitInfo submitInfo = {
@@ -526,9 +539,9 @@ static bool createLogicalDevice() {
 		vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT
 	> featureChain{
 		{},
-		{.shaderDrawParameters = true, },
-		{.dynamicRendering = true, },
-		{.extendedDynamicState = true, },
+		{ .shaderDrawParameters = true, },
+		{ .synchronization2 = true, .dynamicRendering = true, },
+		{ .extendedDynamicState = true, },
 	};
 
 	std::vector<const char*> requiredExtensions{
@@ -856,7 +869,8 @@ static VKAPI_ATTR vk::Bool32 VKAPI_CALL debugCallback(
 	vk::DebugUtilsMessageSeverityFlagBitsEXT severity,
 	vk::DebugUtilsMessageTypeFlagsEXT type,
 	const vk::DebugUtilsMessengerCallbackDataEXT* callbackData,
-	void* userData) {
+	void* userData
+) {
 #ifdef BUILD_NDEBUG
 	if (severity >= vk::DebugUtilsMessageSeverityFlagBitsEXT::eWarning)
 #endif
@@ -918,6 +932,8 @@ static bool isDeviceSuitable(const vk::PhysicalDevice& device) {
 	>();
 
 	if (!features.get<vk::PhysicalDeviceVulkan11Features>().shaderDrawParameters)
+		return false;
+	if (!features.get<vk::PhysicalDeviceVulkan13Features>().synchronization2)
 		return false;
 	if (!features.get<vk::PhysicalDeviceVulkan13Features>().dynamicRendering)
 		return false;
@@ -1044,7 +1060,12 @@ static std::expected<vk::ShaderModule, vk::Result> createShaderModule(std::files
 	return l_logicalDevice.createShaderModule(createInfo);
 }
 
-static void transitionImageLayout(uint32_t imageIndex, vk::ImageLayout prevLayout, vk::ImageLayout nextLayout, vk::AccessFlags2 srcAccessMask, vk::AccessFlags2 dstAccessMask, vk::PipelineStageFlags2 srcStageMask, vk::PipelineStageFlags2 dstStageMask) {
+static void transitionImageLayout(
+	uint32_t imageIndex,
+	vk::ImageLayout prevLayout, vk::ImageLayout nextLayout,
+	vk::AccessFlags2 srcAccessMask, vk::AccessFlags2 dstAccessMask,
+	vk::PipelineStageFlags2 srcStageMask, vk::PipelineStageFlags2 dstStageMask
+) {
 	vk::ImageMemoryBarrier2 barrier = {
 		.srcStageMask = srcStageMask,
 		.srcAccessMask = srcAccessMask,
