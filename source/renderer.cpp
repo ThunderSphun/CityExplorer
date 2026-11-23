@@ -10,6 +10,7 @@
 
 #include <vector>
 #include <array>
+#define VULKAN_HPP_HANDLE_ERROR_OUT_OF_DATE_AS_SUCCESS
 #include <vulkan/vulkan.hpp>
 #include <SDL3/SDL_vulkan.h>
 #include <glm/glm.hpp>
@@ -49,6 +50,7 @@ static bool createSwapchain();
 static bool createGraphicsPipeline();
 static bool createCommandPool();
 static bool createSyncObjects();
+static void recreateSwapchain();
 
 static void recordCommandBuffer(uint32_t imageIndex);
 
@@ -290,15 +292,30 @@ void CityExplorer::drawFrame() {
 		std::println(std::cerr, "Got error {} whilst waiting for drawing fence", vk::to_string(fenceResult));
 		return;
 	}
-	std::expected<void, vk::Result> fenceResetResult = l_logicalDevice.resetFences(l_drawFences[frameIndex]);
-	if (!fenceResetResult) {
-		std::println(std::cerr, "Got error {} whilst reseting drawing fence", vk::to_string(fenceResetResult.error()));
-		return;
-	}
 
 	vk::ResultValue<uint32_t> imageIndex = l_logicalDevice.acquireNextImageKHR(l_swapchain, UINT64_MAX, l_presentCompleteSemaphores[frameIndex]);
 	if (!imageIndex.has_value()) {
-		std::println(std::cerr, "got error {} whilst acquiring next image", vk::to_string(imageIndex.result));
+		if (imageIndex.result == vk::Result::eErrorOutOfDateKHR) {
+#ifdef BUILD_DEBUG
+			std::println("acquiring the image index requires a new swapchain");
+#endif
+			recreateSwapchain();
+			return;
+		}
+		if (imageIndex.result == vk::Result::eSuboptimalKHR) {
+			// is this even possible?
+#ifdef BUILD_DEBUG
+			std::println("swapchain is suboptimal for the current image");
+#endif
+		} else {
+			std::println(std::cerr, "got error {} whilst acquiring next image", vk::to_string(imageIndex.result));
+			return;
+		}
+	}
+
+	std::expected<void, vk::Result> fenceResetResult = l_logicalDevice.resetFences(l_drawFences[frameIndex]);
+	if (!fenceResetResult) {
+		std::println(std::cerr, "Got error {} whilst reseting drawing fence", vk::to_string(fenceResetResult.error()));
 		return;
 	}
 
@@ -332,6 +349,19 @@ void CityExplorer::drawFrame() {
 	};
 
 	vk::Result presentResult = l_graphicsQueue.presentKHR(presentInfo);
+	if (presentResult == vk::Result::eSuccess) {
+	} else if (presentResult == vk::Result::eErrorOutOfDateKHR) {
+#ifdef BUILD_DEBUG
+		std::println("presenting the graphics queue requires a new swapchain");
+#endif
+		recreateSwapchain();
+	} else if (presentResult == vk::Result::eSuboptimalKHR) {
+#ifdef BUILD_DEBUG
+		std::println("swapchain is suboptimal for graphics queue presenting");
+#endif
+	} else {
+		std::println(std::cerr, "got error {} whilst presenting graphics queue", vk::to_string(presentResult));
+	}
 
 	frameIndex++;
 	frameIndex %= MAX_FRAMES_IN_FLIGHT;
@@ -838,6 +868,27 @@ cleanup_presentComplete:
 
 cleanup:
 	return false;
+}
+
+static void recreateSwapchain() {
+	std::expected<void, vk::Result> waitIdleResult = l_logicalDevice.waitIdle();
+	if (!waitIdleResult)
+		std::println(std::cerr, "got error {} whilst waiting for idle logical device", vk::to_string(waitIdleResult.error()));
+
+	for (vk::ImageView& imageView : l_imageViews)
+		l_logicalDevice.destroyImageView(imageView);
+
+	l_imageViews.clear();
+	l_imageViews.shrink_to_fit();
+
+	l_images.clear();
+	l_images.shrink_to_fit();
+
+	l_logicalDevice.destroySwapchainKHR(l_swapchain);
+	l_swapchain = nullptr;
+
+	createSwapchain();
+	createImages();
 }
 
 static void recordCommandBuffer(uint32_t imageIndex) {
