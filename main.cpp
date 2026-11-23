@@ -44,23 +44,42 @@ cleanup:
 }
 
 static void run() {
-	int i = 0;
 	const char* videoDriver = SDL_GetCurrentVideoDriver();
-	bool isWayland = videoDriver && strcmp(videoDriver, "wayland") == 0;
-	while(i < 120) {
+	bool minimized = false;
+	while(true) {
 		SDL_Event event;
 		while (SDL_PollEvent(&event)) {
 			if (event.type == SDL_EVENT_QUIT)
-				i = 120;
+				return;
 			if (event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED && event.window.windowID == SDL_GetWindowID(CityExplorer::g_window))
-				i = 120;
-		}
-		// run for 120 frames on wayland
-		// dirty fix to have the application be able to be closed easily
-		// wayland only shows a window when the first buffer is submitted
-		i += isWayland;
+				return;
+			if (event.type == SDL_EVENT_WINDOW_MINIMIZED)
+				minimized = true;
+			if (event.type == SDL_EVENT_WINDOW_RESTORED)
+				minimized = false;
+			if (event.type == SDL_EVENT_WINDOW_RESIZED || event.type == SDL_EVENT_WINDOW_ENTER_FULLSCREEN || event.type == SDL_EVENT_WINDOW_LEAVE_FULLSCREEN)
+				CityExplorer::recreateSwapchain();
 
-		CityExplorer::drawFrame();
+			if (event.type == SDL_EVENT_KEY_DOWN) {
+				if (event.key.key == SDLK_1) {
+					SDL_SetWindowFullscreenMode(CityExplorer::g_window, NULL);
+					SDL_SetWindowFullscreen(CityExplorer::g_window, true);
+				}
+				if (event.key.key == SDLK_2)
+					SDL_SetWindowFullscreen(CityExplorer::g_window, false);
+				if (event.key.key == SDLK_3)
+					SDL_MaximizeWindow(CityExplorer::g_window);
+				if (event.key.key == SDLK_4)
+					SDL_RestoreWindow(CityExplorer::g_window);
+				if (event.key.key == SDLK_5) {
+					SDL_MinimizeWindow(CityExplorer::g_window);
+					minimized = true;
+				}
+			}
+		}
+
+		if (!minimized)
+			CityExplorer::drawFrame();
 	}
 }
 

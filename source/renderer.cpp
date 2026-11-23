@@ -50,7 +50,6 @@ static bool createSwapchain();
 static bool createGraphicsPipeline();
 static bool createCommandPool();
 static bool createSyncObjects();
-static void recreateSwapchain();
 
 static void recordCommandBuffer(uint32_t imageIndex);
 
@@ -870,7 +869,14 @@ cleanup:
 	return false;
 }
 
-static void recreateSwapchain() {
+void CityExplorer::recreateSwapchain() {
+	if (!l_instance) {
+#ifdef BUILD_NDIST
+		std::println(std::cerr, "Tried to recreate swapchain without vulkan being initialized");
+#endif;
+		return;
+	}
+
 	std::expected<void, vk::Result> waitIdleResult = l_logicalDevice.waitIdle();
 	if (!waitIdleResult)
 		std::println(std::cerr, "got error {} whilst waiting for idle logical device", vk::to_string(waitIdleResult.error()));
